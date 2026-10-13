@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, maximum-scale=1.0, user-scalable=no" />
+  <meta name="theme-color" content="#d32f2f" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+  <meta name="apple-mobile-web-app-title" content="西北探吉" />
+  <meta name="description" content="西北保全與西北公寓大廈管理維護業務平台" />
+  <link rel="manifest" href="manifest.json" />
+  <link rel="icon" type="image/svg+xml" href="assets/icon-192.svg" />
+  <link rel="apple-touch-icon" href="assets/icon-192.svg" />
+  <link rel="stylesheet" href="css/style.css?v=16" />
+  <title>西北探吉業務平台</title>
+</head>
+<body>
+  <!-- 應用根容器 -->
+  <div id="app"></div>
+
+  <!-- 自訂 Modal 容器（確認/輸入彈窗） -->
+  <div id="modal-root"></div>
+
+  <!-- Toast 通知容器 -->
+  <div id="toast-root"></div>
+
+  <!-- Firebase Web SDK (CDN) -->
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-storage-compat.js"></script>
+
+  <!-- 應用程式指令碼（載入順序不可變動） -->
+  <script src="firebase-config.js?v=16"></script>
+  <script src="js/firebase-init.js?v=16"></script>
+  <script src="js/ui.js?v=16"></script>
+  <script src="js/auth.js?v=16"></script>
+  <script src="js/dashboard.js?v=16"></script>
+  <script src="js/projects.js?v=16"></script>
+  <script src="js/documents.js?v=16"></script>
+  <script src="js/quotes.js?v=16"></script>
+  <script src="js/cost-analysis.js?v=16"></script>
+  <script src="js/users.js?v=16"></script>
+  <script src="js/app.js?v=16"></script>
+
+  <script>
+    // 註冊 Service Worker
+    if ("serviceWorker" in navigator) {
+      window.addEventListener("load", () => {
+        navigator.serviceWorker.register("./sw.js").catch((err) => {
+          console.warn("Service Worker 註冊失敗:", err);
+        });
+      });
+    }
+
+    // 攔截 PWA 安裝提示
+    let deferredPrompt = null;
+    window.addEventListener("beforeinstallprompt", (e) => {
+      e.preventDefault();
+      deferredPrompt = e;
+      window.dispatchEvent(new CustomEvent("pwa-install-available"));
+    });
+    window.NW_PWA_PROMPT = () => {
+      if (deferredPrompt) {
+        deferredPrompt.prompt();
+        deferredPrompt.userChoice.then(() => { deferredPrompt = null; });
+      }
+    };
+  </script>
+</body>
+</html>
