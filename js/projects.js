@@ -687,14 +687,14 @@
     // 雙擊重設縮放
     vp.addEventListener("dblclick", () => resetZoom());
 
-    // 滑動/拖曳手勢（切換圖片 + 拖曳平移）
+    // 滑動/拖曳手勢（切換圖片 + 拖曳平移 + 雙指縮放）
     let startX = 0, startY = 0, curX = 0, curY = 0;
-    let dragging = false, moved = false, startTime = 0;
+    let dragging = false, moved = false;
     const SWIPE_THRESHOLD = 60;
 
     function onStart(x, y) {
       startX = x; startY = y; curX = x; curY = y;
-      dragging = true; moved = false; startTime = Date.now();
+      dragging = true; moved = false;
     }
     function onMove(x, y) {
       if (!dragging) return;
@@ -703,10 +703,9 @@
       const dy = curY - startY;
       if (Math.abs(dx) > 4 || Math.abs(dy) > 4) moved = true;
       if (scale > 1) {
-        // 縮放狀態下：拖曳平移圖片
+        imgEl.style.transition = "none";
         imgEl.style.transform = `translate(${translateX + dx}px, ${translateY + dy}px) scale(${scale})`;
       } else {
-        // 未縮放：跟手滑動（切換預覽）
         imgEl.style.transition = "none";
         imgEl.style.transform = `translateX(${dx}px) scale(${scale})`;
       }
@@ -717,12 +716,9 @@
       const dx = curX - startX;
       const dy = curY - startY;
       if (scale > 1) {
-        // 拖曳平移確認
-        translateX += dx;
-        translateY += dy;
+        translateX += dx; translateY += dy;
         updateImg();
       } else {
-        // 還原動畫
         imgEl.style.transition = "";
         if (Math.abs(dx) > SWIPE_THRESHOLD && Math.abs(dx) > Math.abs(dy)) {
           if (dx < 0) showIdx(cur + 1);
@@ -733,16 +729,94 @@
       }
     }
 
-    // 觸控
+    // ---------- 觸控手勢（支援單指滑動/拖曳 + 雙指縮放/平移） ----------
+    const pointers = new Map(); // touchId -> {x, y}
+    let pinchMode = false;
+    let pinchStartDist = 0;
+    let pinchStartScale = 1;
+    let pinchStartMidX = 0, pinchStartMidY = 0;
+    let pinchStartTransX = 0, pinchStartTransY = 0;
+
+    function touchDist(t1, t2) {
+      const dx = t1.x - t2.x;
+      const dy = t1.y - t2.y;
+      return Math.sqrt(dx * dx + dy * dy);
+    }
+
     vp.addEventListener("touchstart", (e) => {
-      const t = e.touches[0]; onStart(t.clientX, t.clientY);
+      for (const t of e.changedTouches) {
+        pointers.set(t.identifier, { x: t.clientX, y: t.clientY });
+      }
+      if (pointers.size >= 2) {
+        // 進入雙指縮放模式
+        pinchMode = true;
+        const pts = Array.from(pointers.values()).slice(0, 2);
+        pinchStartDist = touchDist(pts[0], pts[1]);
+        pinchStartScale = scale;
+        pinchStartMidX = (pts[0].x + pts[1].x) / 2;
+        pinchStartMidY = (pts[0].y + pts[1].y) / 2;
+        pinchStartTransX = translateX;
+        pinchStartTransY = translateY;
+        imgEl.style.transition = "none";
+      } else if (pointers.size === 1) {
+        const pt = pointers.values().next().value;
+        onStart(pt.x, pt.y);
+      }
     }, { passive: true });
+
     vp.addEventListener("touchmove", (e) => {
-      if (!dragging) return;
-      const t = e.touches[0]; onMove(t.clientX, t.clientY);
-      e.preventDefault();
+      for (const t of e.changedTouches) {
+        pointers.set(t.identifier, { x: t.clientX, y: t.clientY });
+      }
+      if (pinchMode && pointers.size >= 2) {
+        e.preventDefault();
+        const pts = Array.from(pointers.values()).slice(0, 2);
+        const dist = touchDist(pts[0], pts[1]);
+        // 縮放：以初始距離比例計算新 scale
+        const newScale = Math.min(5, Math.max(0.3, pinchStartScale * (dist / pinchStartDist)));
+        scale = newScale;
+        // 平移：以雙指中心位移平移圖片
+        const midX = (pts[0].x + pts[1].x) / 2;
+        const midY = (pts[0].y + pts[1].y) / 2;
+        translateX = pinchStartTransX + (midX - pinchStartMidX);
+        translateY = pinchStartTransY + (midY - pinchStartMidY);
+        imgEl.style.transform = `translate(${translateX}px, ${translateY}px) scale(${scale})`;
+        zoomLevelEl.textContent = Math.round(scale * 100) + "%";
+      } else if (pointers.size === 1 && !pinchMode) {
+        e.preventDefault();
+        const pt = pointers.values().next().value;
+        onMove(pt.x, pt.y);
+      }
     }, { passive: false });
-    vp.addEventListener("touchend", onEnd);
+
+    vp.addEventListener("touchend", (e) => {
+      for (const t of e.changedTouches) {
+        pointers.delete(t.identifier);
+      }
+      if (pointers.size < 2) {
+        // 結束雙指模式
+        if (pinchMode) {
+          pinchMode = false;
+          // 若縮放回到接近 1，則重置平移
+          if (scale <= 1.01) resetZoom();
+          else updateImg();
+        }
+      }
+      if (pointers.size === 0) {
+        // 所有手指離開，若不是雙指模式則處理單指結束
+        if (!pinchMode) onEnd();
+      } else if (pointers.size === 1 && !pinchMode) {
+        // 從雙指變單指（或本來單指），重置單指起點
+        const pt = pointers.values().next().value;
+        onStart(pt.x, pt.y);
+      }
+    }, { passive: true });
+
+    vp.addEventListener("touchcancel", () => {
+      pointers.clear();
+      pinchMode = false;
+      if (dragging) onEnd();
+    }, { passive: true });
 
     // 滑鼠拖曳
     vp.addEventListener("mousedown", (e) => { e.preventDefault(); onStart(e.clientX, e.clientY); });
