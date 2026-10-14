@@ -32,7 +32,7 @@
     const uid = NW.Auth.getUser().uid;
 
     container.innerHTML = `
-      <div class="page-title">項目管理 <span class="proj-hint">（長按列 3 秒可編輯）</span></div>
+      <div class="page-title">項目管理 <span class="proj-hint">（連續點擊列 3 次可編輯）</span></div>
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
         <div style="display:flex;gap:8px">
           <input id="proj-search" placeholder="搜尋項目名稱或客戶..." style="padding:8px 12px;border:1px solid var(--line);border-radius:var(--radius-sm);min-width:220px" />
@@ -113,7 +113,7 @@
         </tr>`;
       }).join("");
       body.querySelectorAll(".proj-link").forEach((a) => a.onclick = (e) => { e.preventDefault(); showDetail(a.dataset.id); });
-      body.querySelectorAll(".proj-row").forEach((tr) => bindLongPress(tr, () => showProjectForm(tr.dataset.id)));
+      body.querySelectorAll(".proj-row").forEach((tr) => bindTripleClick(tr, () => showProjectForm(tr.dataset.id)));
       body.querySelectorAll(".stage-clickable").forEach((sp) => sp.onclick = (e) => { e.stopPropagation(); showStageModal(sp.dataset.pid, sp.dataset.stage); });
       body.querySelectorAll("[data-view-quote]").forEach((b) => b.onclick = (e) => { e.stopPropagation(); viewProjectImages(b.dataset.viewQuote, "quote"); });
       body.querySelectorAll("[data-view-feedback]").forEach((b) => b.onclick = (e) => { e.stopPropagation(); viewProjectImages(b.dataset.viewFeedback, "feedback"); });
@@ -171,32 +171,35 @@
     });
   }
 
-  /* ---------- 長按 3 秒輔助 ---------- */
-  function bindLongPress(el, callback, duration = 3000) {
-    let timer = null;
-    let pressed = false;
-    const start = (e) => {
+  /* ---------- 連續快按 3 次輔助 ---------- */
+  function bindTripleClick(el, callback, windowMs = 800) {
+    let clicks = [];
+    let feedbackTimer = null;
+
+    const handle = (e) => {
       if (e.target.closest(".file-icon-btn") || e.target.closest(".proj-link") || e.target.closest(".stage-clickable")) return;
-      pressed = true;
-      el.classList.add("long-pressing");
-      timer = setTimeout(() => {
-        if (pressed) {
-          el.classList.remove("long-pressing");
-          callback();
-        }
-      }, duration);
+
+      const now = Date.now();
+      clicks = clicks.filter((t) => now - t < windowMs);
+      clicks.push(now);
+
+      if (clicks.length >= 3) {
+        clicks = [];
+        el.classList.remove("triple-clicking");
+        if (feedbackTimer) { clearTimeout(feedbackTimer); feedbackTimer = null; }
+        callback();
+        return;
+      }
+
+      el.classList.add("triple-clicking");
+      if (feedbackTimer) clearTimeout(feedbackTimer);
+      feedbackTimer = setTimeout(() => {
+        el.classList.remove("triple-clicking");
+        clicks = [];
+      }, windowMs);
     };
-    const end = () => {
-      pressed = false;
-      el.classList.remove("long-pressing");
-      if (timer) { clearTimeout(timer); timer = null; }
-    };
-    el.addEventListener("mousedown", start);
-    el.addEventListener("mouseup", end);
-    el.addEventListener("mouseleave", end);
-    el.addEventListener("touchstart", start, { passive: true });
-    el.addEventListener("touchend", end);
-    el.addEventListener("touchcancel", end);
+
+    el.addEventListener("click", handle);
   }
 
   /* ---------- 新增/編輯表單 ---------- */
