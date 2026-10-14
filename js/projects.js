@@ -237,9 +237,9 @@
     const currentUserName = (NW.Auth.getUserData() && NW.Auth.getUserData().displayName) || NW.Auth.getUser().email;
     const ownerDefault = data.ownerName || currentUserName;
 
-    // 圖片上傳狀態
-    const quoteImages = [...(data.quoteImages || [])];
-    const feedbackImages = [...(data.feedbackImages || [])];
+    // 圖片上傳狀態（正規化：確保每張圖片都是 {url, name} 物件，避免舊格式造成 Firestore 錯誤）
+    const quoteImages = (data.quoteImages || []).map(normalizeImage);
+    const feedbackImages = (data.feedbackImages || []).map(normalizeImage);
     const pendingQuote = []; // 待上傳的 File 物件
     const pendingFeedback = [];
     const removingQuote = new Set(); // 待刪除的 URL
@@ -319,54 +319,59 @@
         const name = document.getElementById("f-name").value.trim();
         if (!name) { NW.toast("請輸入項目名稱", "error"); return; }
 
-        // 上傳新圖片
-        let quoteUrls = quoteImages.filter((img) => !removingQuote.has(img.url)).map((img) => img.url);
-        let feedbackUrls = feedbackImages.filter((img) => !removingFeedback.has(img.url)).map((img) => img.url);
+        try {
+          // 上傳新圖片（轉為 Base64 存入 Firestore）
+          let quoteList = sanitizeImages(quoteImages.filter((img) => img && !removingQuote.has(img.url)));
+          let feedbackList = sanitizeImages(feedbackImages.filter((img) => img && !removingFeedback.has(img.url)));
 
-        if (pendingQuote.length > 0) {
-          NW.toast("上傳報價單圖片中...", "info");
-          const uploaded = await uploadImages(pendingQuote, "quote");
-          quoteUrls = quoteUrls.concat(uploaded);
-        }
-        if (pendingFeedback.length > 0) {
-          NW.toast("上傳回饋項目圖片中...", "info");
-          const uploaded = await uploadImages(pendingFeedback, "feedback");
-          feedbackUrls = feedbackUrls.concat(uploaded);
-        }
+          if (pendingQuote.length > 0) {
+            NW.toast("處理報價單圖片中...", "info");
+            const uploaded = await uploadImages(pendingQuote, "quote");
+            quoteList = sanitizeImages(quoteList.concat(uploaded));
+          }
+          if (pendingFeedback.length > 0) {
+            NW.toast("處理回饋項目圖片中...", "info");
+            const uploaded = await uploadImages(pendingFeedback, "feedback");
+            feedbackList = sanitizeImages(feedbackList.concat(uploaded));
+          }
 
-        const payload = {
-          name,
-          client: document.getElementById("f-client").value.trim(),
-          households: parseInt(document.getElementById("f-households").value, 10) || 0,
-          buildingAge: parseInt(document.getElementById("f-buildingAge").value, 10) || 0,
-          contact: document.getElementById("f-contact").value.trim(),
-          community: document.getElementById("f-community").value.trim(),
-          status: document.getElementById("f-status").value,
-          note: document.getElementById("f-note").value,
-          reminder: parseDT(document.getElementById("f-reminder").value),
-          quoteImages: quoteUrls.map((url) => ({ url, name: extractName(url) })),
-          feedbackImages: feedbackUrls.map((url) => ({ url, name: extractName(url) })),
-          updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
-        };
-        // 需求人力
-        const manpower = {};
-        MANPOWER_ROLES.forEach((r) => { manpower[r] = parseInt(document.getElementById(`f-mp-${r}`).value, 10) || 0; });
-        payload.manpower = manpower;
-        STAGES.forEach((st) => { payload[st.key] = parseDT(document.getElementById(`f-${st.key}`).value); });
-        if (isAdmin) {
-          payload.ownerName = document.getElementById("f-owner").value.trim() || currentUserName;
+          const payload = {
+            name,
+            client: document.getElementById("f-client").value.trim(),
+            households: parseInt(document.getElementById("f-households").value, 10) || 0,
+            buildingAge: parseInt(document.getElementById("f-buildingAge").value, 10) || 0,
+            contact: document.getElementById("f-contact").value.trim(),
+            community: document.getElementById("f-community").value.trim(),
+            status: document.getElementById("f-status").value,
+            note: document.getElementById("f-note").value,
+            reminder: parseDT(document.getElementById("f-reminder").value),
+            quoteImages: quoteList,
+            feedbackImages: feedbackList,
+            updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
+          };
+          // 需求人力
+          const manpower = {};
+          MANPOWER_ROLES.forEach((r) => { manpower[r] = parseInt(document.getElementById(`f-mp-${r}`).value, 10) || 0; });
+          payload.manpower = manpower;
+          STAGES.forEach((st) => { payload[st.key] = parseDT(document.getElementById(`f-${st.key}`).value); });
+          if (isAdmin) {
+            payload.ownerName = document.getElementById("f-owner").value.trim() || currentUserName;
+          }
+          if (!isEdit) {
+            payload.ownerUid = NW.Auth.getUser().uid;
+            payload.ownerName = isAdmin ? (payload.ownerName) : NW.Auth.getUserData().displayName;
+            payload.createdAt = firebase.firestore.FieldValue.serverTimestamp();
+            await db.collection("projects").add(payload);
+            NW.toast("項目已建立", "success");
+          } else {
+            await db.collection("projects").doc(id).update(payload);
+            NW.toast("項目已更新", "success");
+          }
+          close();
+        } catch (err) {
+          console.error("儲存失敗:", err);
+          NW.toast("儲存失敗: " + (err.message || err), "error");
         }
-        if (!isEdit) {
-          payload.ownerUid = NW.Auth.getUser().uid;
-          payload.ownerName = isAdmin ? (payload.ownerName) : NW.Auth.getUserData().displayName;
-          payload.createdAt = firebase.firestore.FieldValue.serverTimestamp();
-          await db.collection("projects").add(payload);
-          NW.toast("項目已建立", "success");
-        } else {
-          await db.collection("projects").doc(id).update(payload);
-          NW.toast("項目已更新", "success");
-        }
-        close();
       },
     });
 
@@ -459,19 +464,24 @@
     });
   }
 
-  /** 上傳圖片到 Firebase Storage，回傳 download URL 陣列 */
+  /** 將圖片檔案轉為 Base64 Data URL（存儲於 Firestore，不使用 Cloud Storage） */
+  async function fileToBase64(file) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result);
+      reader.onerror = reject;
+      reader.readAsDataURL(file);
+    });
+  }
+
+  /** 上傳圖片：轉為 Base64 後直接存入 Firestore，回傳 {url, name} 陣列 */
   async function uploadImages(files, folder) {
-    const uid = NW.Auth.getUser().uid;
-    const urls = [];
+    const results = [];
     for (const file of files) {
-      const ext = file.name.split(".").pop() || "jpg";
-      const fname = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}.${ext}`;
-      const ref = window.storage.ref(`projects/${uid}/${folder}/${fname}`);
-      await ref.put(file);
-      const url = await ref.getDownloadURL();
-      urls.push(url);
+      const base64 = await fileToBase64(file);
+      results.push({ url: base64, name: file.name });
     }
-    return urls;
+    return results;
   }
 
   function extractName(url) {
@@ -561,27 +571,194 @@
     NW.toast("項目已刪除", "success");
   }
 
-  /** 檢視項目的圖片（報價單或回饋項目） */
+  /** 檢視項目的圖片（燈箱模式：單張顯示、可縮放、可左右滑動切換） */
   async function viewProjectImages(id, type) {
     const doc = await db.collection("projects").doc(id).get();
     const p = doc.data() || {};
-    const images = type === "quote" ? (p.quoteImages || []) : (p.feedbackImages || []);
+    const images = sanitizeImages(type === "quote" ? (p.quoteImages || []) : (p.feedbackImages || []));
     const title = type === "quote" ? "報價單圖片" : "回饋項目圖片";
 
-    NW.modal({
-      title: `${title} (${images.length}/5)`,
-      large: true,
-      body: images.length
-        ? `<div class="img-grid-view">${images.map((img) => `
-            <a href="${img.url}" target="_blank" class="img-view-item">
-              <img src="${img.url}" alt="${img.name || ""}" />
-            </a>`).join("")}
-          </div>`
-        : `<div class="empty" style="padding:24px;text-align:center;color:var(--ink-2)">暫無圖片，請至「編輯項目」上傳</div>`,
-      onConfirm: (close) => close(),
-      confirmText: "關閉",
-      cancelText: "關閉",
+    if (!images.length) {
+      NW.modal({
+        title: title,
+        body: `<div class="empty" style="padding:24px;text-align:center;color:var(--ink-2)">暫無圖片，請至「編輯項目」上傳</div>`,
+        onConfirm: (close) => close(),
+        confirmText: "關閉",
+        cancelText: "關閉",
+      });
+      return;
+    }
+
+    // 建立自訂燈箱（90% 視窗大小）
+    const lbId = "lb-" + Date.now();
+    const overlay = document.createElement("div");
+    overlay.className = "lightbox-overlay";
+    overlay.id = lbId;
+    overlay.innerHTML = `
+      <div class="lightbox-shell">
+        <div class="lightbox-header">
+          <span class="lightbox-title">${title}</span>
+          <span class="lightbox-counter"><span class="lb-cur">1</span> / ${images.length}</span>
+          <button class="lightbox-close" aria-label="關閉">✕</button>
+        </div>
+        <div class="lightbox-stage" id="${lbId}-stage">
+          <button class="lb-nav lb-prev" aria-label="上一張">‹</button>
+          <div class="lightbox-viewport" id="${lbId}-vp">
+            <img class="lightbox-img" src="${images[0].url}" alt="${images[0].name || ""}" />
+          </div>
+          <button class="lb-nav lb-next" aria-label="下一張">›</button>
+        </div>
+        <div class="lightbox-footer">
+          <button class="lb-zoom-out" aria-label="縮小">−</button>
+          <span class="lb-zoom-level">100%</span>
+          <button class="lb-zoom-in" aria-label="放大">+</button>
+          <button class="lb-zoom-reset" aria-label="重設">重設</button>
+        </div>
+      </div>`;
+    document.getElementById("modal-root").appendChild(overlay);
+
+    // 狀態
+    let cur = 0;
+    let scale = 1;
+    let translateX = 0;
+    let translateY = 0;
+    const vp = overlay.querySelector(".lightbox-viewport");
+    const imgEl = overlay.querySelector(".lightbox-img");
+    const counterCur = overlay.querySelector(".lb-cur");
+    const zoomLevelEl = overlay.querySelector(".lb-zoom-level");
+
+    function updateImg() {
+      imgEl.style.transform = `translate(${translateX}px, ${translateY}px) scale(${scale})`;
+      zoomLevelEl.textContent = Math.round(scale * 100) + "%";
+    }
+
+    function showIdx(idx) {
+      cur = (idx + images.length) % images.length;
+      scale = 1; translateX = 0; translateY = 0;
+      imgEl.src = images[cur].url;
+      imgEl.alt = images[cur].name || "";
+      counterCur.textContent = cur + 1;
+      updateImg();
+    }
+
+    function zoomBy(factor) {
+      scale = Math.min(5, Math.max(0.3, scale * factor));
+      updateImg();
+    }
+
+    function resetZoom() {
+      scale = 1; translateX = 0; translateY = 0;
+      updateImg();
+    }
+
+    // 關閉
+    function close() { overlay.remove(); }
+    overlay.querySelector(".lightbox-close").onclick = close;
+    overlay.onclick = (e) => { if (e.target === overlay) close(); };
+
+    // 上下張按鈕
+    overlay.querySelector(".lb-prev").onclick = (e) => { e.stopPropagation(); showIdx(cur - 1); };
+    overlay.querySelector(".lb-next").onclick = (e) => { e.stopPropagation(); showIdx(cur + 1); };
+
+    // 縮放按鈕
+    overlay.querySelector(".lb-zoom-in").onclick = (e) => { e.stopPropagation(); zoomBy(1.25); };
+    overlay.querySelector(".lb-zoom-out").onclick = (e) => { e.stopPropagation(); zoomBy(0.8); };
+    overlay.querySelector(".lb-zoom-reset").onclick = (e) => { e.stopPropagation(); resetZoom(); };
+
+    // 鍵盤操作
+    function onKey(e) {
+      if (e.key === "Escape") close();
+      else if (e.key === "ArrowLeft") showIdx(cur - 1);
+      else if (e.key === "ArrowRight") showIdx(cur + 1);
+      else if (e.key === "+" || e.key === "=") zoomBy(1.25);
+      else if (e.key === "-" || e.key === "_") zoomBy(0.8);
+    }
+    document.addEventListener("keydown", onKey);
+    overlay._onKey = onKey;
+    const origClose = close;
+    overlay.close = function () { document.removeEventListener("keydown", onKey); origClose(); };
+
+    // 滑鼠滾輪縮放
+    vp.addEventListener("wheel", (e) => {
+      e.preventDefault();
+      zoomBy(e.deltaY < 0 ? 1.1 : 0.9);
+    }, { passive: false });
+
+    // 雙擊重設縮放
+    vp.addEventListener("dblclick", () => resetZoom());
+
+    // 滑動/拖曳手勢（切換圖片 + 拖曳平移）
+    let startX = 0, startY = 0, curX = 0, curY = 0;
+    let dragging = false, moved = false, startTime = 0;
+    const SWIPE_THRESHOLD = 60;
+
+    function onStart(x, y) {
+      startX = x; startY = y; curX = x; curY = y;
+      dragging = true; moved = false; startTime = Date.now();
+    }
+    function onMove(x, y) {
+      if (!dragging) return;
+      curX = x; curY = y;
+      const dx = curX - startX;
+      const dy = curY - startY;
+      if (Math.abs(dx) > 4 || Math.abs(dy) > 4) moved = true;
+      if (scale > 1) {
+        // 縮放狀態下：拖曳平移圖片
+        imgEl.style.transform = `translate(${translateX + dx}px, ${translateY + dy}px) scale(${scale})`;
+      } else {
+        // 未縮放：跟手滑動（切換預覽）
+        imgEl.style.transition = "none";
+        imgEl.style.transform = `translateX(${dx}px) scale(${scale})`;
+      }
+    }
+    function onEnd() {
+      if (!dragging) return;
+      dragging = false;
+      const dx = curX - startX;
+      const dy = curY - startY;
+      if (scale > 1) {
+        // 拖曳平移確認
+        translateX += dx;
+        translateY += dy;
+        updateImg();
+      } else {
+        // 還原動畫
+        imgEl.style.transition = "";
+        if (Math.abs(dx) > SWIPE_THRESHOLD && Math.abs(dx) > Math.abs(dy)) {
+          if (dx < 0) showIdx(cur + 1);
+          else showIdx(cur - 1);
+        } else {
+          resetZoom();
+        }
+      }
+    }
+
+    // 觸控
+    vp.addEventListener("touchstart", (e) => {
+      const t = e.touches[0]; onStart(t.clientX, t.clientY);
+    }, { passive: true });
+    vp.addEventListener("touchmove", (e) => {
+      if (!dragging) return;
+      const t = e.touches[0]; onMove(t.clientX, t.clientY);
+      e.preventDefault();
+    }, { passive: false });
+    vp.addEventListener("touchend", onEnd);
+
+    // 滑鼠拖曳
+    vp.addEventListener("mousedown", (e) => { e.preventDefault(); onStart(e.clientX, e.clientY); });
+    window.addEventListener("mousemove", (e) => onMove(e.clientX, e.clientY));
+    window.addEventListener("mouseup", onEnd);
+
+    // 關閉時移除全域監聽
+    const observer = new MutationObserver(() => {
+      if (!document.body.contains(overlay)) {
+        window.removeEventListener("mousemove", onMove);
+        window.removeEventListener("mouseup", onEnd);
+        document.removeEventListener("keydown", onKey);
+        observer.disconnect();
+      }
     });
+    observer.observe(document.body, { childList: true, subtree: true });
   }
 
   /** 顯示專案完整資訊（90% 視窗大小） */
@@ -788,6 +965,32 @@
     if (isNaN(dt.getTime())) return "";
     const pad = (n) => String(n).padStart(2, "0");
     return `${dt.getFullYear()}-${pad(dt.getMonth() + 1)}-${pad(dt.getDate())}T${pad(dt.getHours())}:${pad(dt.getMinutes())}`;
+  }
+
+  /**
+   * 正規化圖片物件，確保儲存到 Firestore 前都是 {url: string, name: string} 格式。
+   * 舊資料可能是純字串 URL、缺少 name、或包含無效欄位，需統一處理以避免
+   * "Property array contains an invalid nested entity" 錯誤。
+   */
+  function normalizeImage(img) {
+    if (!img) return null;
+    let url = "";
+    let name = "";
+    if (typeof img === "string") {
+      url = img;
+    } else if (typeof img === "object") {
+      url = img.url || "";
+      name = img.name || "";
+    }
+    // 確保 url 與 name 都是字串（過濾 undefined / null / 非字串值）
+    return { url: String(url || ""), name: String(name || "") };
+  }
+
+  /** 過濾並正規化圖片陣列，移除 url 為空的無效項目 */
+  function sanitizeImages(arr) {
+    return (arr || [])
+      .map(normalizeImage)
+      .filter((img) => img && img.url);
   }
 
   // 大型 Modal 輔助（暴露給其他模組用）

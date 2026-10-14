@@ -222,6 +222,73 @@ tr:hover { background: var(--bg-soft); }
 .img-view-item { display: block; border-radius: var(--radius-sm); overflow: hidden; border: 1px solid var(--line); }
 .img-view-item img { width: 100%; height: 140px; object-fit: cover; display: block; }
 
+/* ---------- 圖片燈箱（單張顯示 + 縮放 + 滑動切換） ---------- */
+.lightbox-overlay {
+  position: fixed; inset: 0; z-index: 10000;
+  background: rgba(0, 0, 0, 0.85);
+  display: flex; align-items: center; justify-content: center;
+}
+.lightbox-shell {
+  width: 90vw; height: 90vh;
+  display: flex; flex-direction: column;
+  background: #1a1a1a; border-radius: 12px; overflow: hidden;
+  box-shadow: 0 20px 60px rgba(0,0,0,0.5);
+}
+.lightbox-header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 10px 16px; background: #222; color: #fff;
+  flex-shrink: 0;
+}
+.lightbox-title { font-size: 15px; font-weight: 600; }
+.lightbox-counter { font-size: 13px; color: #ccc; }
+.lightbox-close {
+  background: none; border: none; color: #fff; font-size: 22px;
+  cursor: pointer; padding: 4px 8px; line-height: 1;
+}
+.lightbox-close:hover { color: var(--brand); }
+.lightbox-stage {
+  flex: 1; display: flex; align-items: center; position: relative;
+  overflow: hidden;
+}
+.lightbox-viewport {
+  flex: 1; height: 100%;
+  display: flex; align-items: center; justify-content: center;
+  overflow: hidden; user-select: none; touch-action: none;
+  cursor: grab;
+}
+.lightbox-viewport:active { cursor: grabbing; }
+.lightbox-img {
+  max-width: 100%; max-height: 100%;
+  object-fit: contain;
+  transform-origin: center center;
+  transition: transform 0.15s ease-out;
+  will-change: transform;
+}
+.lb-nav {
+  position: absolute; top: 50%; transform: translateY(-50%);
+  width: 44px; height: 44px; border-radius: 50%;
+  background: rgba(255,255,255,0.2); color: #fff; border: none;
+  font-size: 28px; cursor: pointer; z-index: 2;
+  display: flex; align-items: center; justify-content: center;
+  transition: background 0.2s;
+}
+.lb-nav:hover { background: rgba(255,255,255,0.4); }
+.lb-prev { left: 12px; }
+.lb-next { right: 12px; }
+.lightbox-footer {
+  display: flex; align-items: center; justify-content: center; gap: 16px;
+  padding: 10px 16px; background: #222; color: #fff;
+  flex-shrink: 0;
+}
+.lightbox-footer button {
+  background: rgba(255,255,255,0.15); color: #fff; border: none;
+  padding: 6px 14px; border-radius: 6px; cursor: pointer; font-size: 14px;
+  min-width: 36px;
+}
+.lightbox-footer button:hover { background: rgba(255,255,255,0.3); }
+.lb-zoom-level { font-size: 13px; min-width: 56px; text-align: center; }
+.lb-zoom-reset { font-size: 12px !important; }
+
 /* ---------- 表單 ---------- */
 .form-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 14px; }
 .form-grid .full { grid-column: 1 / -1; }
