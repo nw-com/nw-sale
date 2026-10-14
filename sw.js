@@ -4,7 +4,7 @@
  * 策略：HTML/JS/CSS 採網路優先（確保最新版），圖片等靜態資源採快取優先
  */
 
-const CACHE_NAME = "nw-tanji-cache-v25";
+const CACHE_NAME = "nw-tanji-cache-v26";
 const APP_SHELL = [
   "./",
   "./index.html",

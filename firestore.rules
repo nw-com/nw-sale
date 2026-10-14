@@ -55,5 +55,12 @@ service cloud.firestore {
         (isAdmin() || get(/databases/$(database)/documents/projects/$(projectId)).data.ownerUid == request.auth.uid)
       );
     }
+
+    // 分享快照集合（公開唯讀，僅已驗證使用者可建立/刪除）
+    match /shares/{shareId} {
+      allow read: if true;
+      allow create: if request.auth != null;
+      allow delete: if request.auth != null;
+    }
   }
 }

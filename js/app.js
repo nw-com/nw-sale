@@ -32,8 +32,15 @@
   function render() {
     // 偵測分享參數（唯讀頁面，不需登入）
     const params = new URLSearchParams(window.location.search);
-    if (params.get("share") === "projects") {
-      renderShareView(params);
+    const shareVal = params.get("share");
+    if (shareVal && shareVal !== "projects") {
+      // 新格式：?share=<shareId>，從 Firestore 取得快照
+      renderShareView(shareVal);
+      return;
+    }
+    if (shareVal === "projects") {
+      // 舊格式相容：?share=projects&data=...
+      renderShareViewLegacy(params);
       return;
     }
     const user = NW.Auth.getUser();
@@ -44,8 +51,67 @@
     renderShell();
   }
 
-  /* ---------- 分享唯讀頁面 ---------- */
-  function renderShareView(params) {
+  /* ---------- 分享唯讀頁面（新格式：從 Firestore 取得快照） ---------- */
+  function renderShareView(shareId) {
+    app.innerHTML = `
+      <div class="share-page">
+        <div id="share-content">
+          <div class="readonly-wrap">
+            <div class="readonly-header">
+              <img src="assets/logo.svg" alt="西北探吉" class="readonly-logo" />
+              <h1 class="readonly-title">載入中...</h1>
+              <p class="readonly-sub">正在取得分享資料</p>
+            </div>
+          </div>
+        </div>
+      </div>`;
+
+    const container = document.getElementById("share-content");
+    const db = window.db || firebase.firestore();
+
+    db.collection("shares").doc(shareId).get()
+      .then((doc) => {
+        if (!doc.exists) {
+          container.innerHTML = `
+            <div class="readonly-wrap">
+              <div class="readonly-header">
+                <img src="assets/logo.svg" alt="西北探吉" class="readonly-logo" />
+                <h1 class="readonly-title">分享連結無效</h1>
+                <p class="readonly-sub">此分享連結不存在或已被刪除，請重新產生。</p>
+              </div>
+            </div>`;
+          return;
+        }
+        const data = doc.data();
+        const projects = data.projects || [];
+        // 等待 projects.js 載入完成後渲染
+        if (NW.Projects && NW.Projects.renderReadOnly) {
+          NW.Projects.renderReadOnly(container, projects);
+        } else {
+          setTimeout(() => {
+            if (NW.Projects && NW.Projects.renderReadOnly) {
+              NW.Projects.renderReadOnly(container, projects);
+            } else {
+              container.innerHTML = `<div class="empty">載入失敗，請重新整理頁面</div>`;
+            }
+          }, 300);
+        }
+      })
+      .catch((err) => {
+        console.error("載入分享資料失敗:", err);
+        container.innerHTML = `
+          <div class="readonly-wrap">
+            <div class="readonly-header">
+              <img src="assets/logo.svg" alt="西北探吉" class="readonly-logo" />
+              <h1 class="readonly-title">載入失敗</h1>
+              <p class="readonly-sub">無法取得分享資料，請稍後再試。</p>
+            </div>
+          </div>`;
+      });
+  }
+
+  /* ---------- 舊格式相容（URL 內嵌資料） ---------- */
+  function renderShareViewLegacy(params) {
     const raw = params.get("data") || "";
     let payload = null;
     try {
@@ -72,11 +138,9 @@
       return;
     }
 
-    // 等待 projects.js 載入完成後渲染
     if (NW.Projects && NW.Projects.renderReadOnly) {
       NW.Projects.renderReadOnly(container, payload.projects);
     } else {
-      // 延遲一次確保模組載入
       setTimeout(() => {
         if (NW.Projects && NW.Projects.renderReadOnly) {
           NW.Projects.renderReadOnly(container, payload.projects);

@@ -577,11 +577,15 @@
     const p = doc.data() || {};
     const images = sanitizeImages(type === "quote" ? (p.quoteImages || []) : (p.feedbackImages || []));
     const title = type === "quote" ? "報價單圖片" : "回饋項目圖片";
+    openImageLightbox(images, title);
+  }
 
-    if (!images.length) {
+  /** 以圖片陣列直接開啟燈箱（用於分享頁面） */
+  function openImageLightbox(images, title) {
+    if (!images || !images.length) {
       NW.modal({
         title: title,
-        body: `<div class="empty" style="padding:24px;text-align:center;color:var(--ink-2)">暫無圖片，請至「編輯項目」上傳</div>`,
+        body: `<div class="empty" style="padding:24px;text-align:center;color:var(--ink-2)">暫無圖片</div>`,
         onConfirm: (close) => close(),
         confirmText: "關閉",
         cancelText: "關閉",
@@ -840,21 +844,28 @@
     const doc = await db.collection("projects").doc(id).get();
     if (!doc.exists) { NW.toast("項目不存在", "error"); return; }
     const p = { id: doc.id, ...doc.data() };
+    showProjectInfoFromData(p);
+  }
+
+  /** 以專案資料物件直接顯示資訊彈窗（用於分享頁面，不需再次查詢 Firestore） */
+  function showProjectInfoFromData(p) {
     const now = new Date();
     const stageDone = p.stageDone || {};
     const manpower = p.manpower || {};
 
     const stageRows = STAGES.map((st) => {
       const t = p[st.key];
+      const dt = t ? (t.toDate ? t.toDate() : new Date(t)) : null;
       const manual = stageDone[st.key];
-      const autoDone = t && t.toDate && t.toDate() < now;
+      const autoDone = dt && dt < now;
       const isExpired = st.key === "close" && autoDone && !manual;
       const done = !!manual || autoDone;
       const badgeCls = isExpired ? "badge-stage-expired" : (done ? "badge-stage-done" : "badge-stage-pending");
+      const manualAt = manual && manual.at ? NW.formatDT(manual.at) : "";
       return `<tr>
         <td><span class="badge ${badgeCls}">${st.label}${manual ? " ✓" : ""}</span></td>
-        <td>${NW.formatDT(t) || "未設定"}</td>
-        <td>${manual ? `${manual.by}${manual.at ? `（${NW.formatDT(manual.at)}）` : ""}` : "-"}</td>
+        <td>${dt ? NW.formatDT(dt) : "未設定"}</td>
+        <td>${manual ? `${manual.by || ""}${manualAt ? `（${manualAt}）` : ""}` : "-"}</td>
       </tr>`;
     }).join("");
 
@@ -910,7 +921,7 @@
     });
   }
 
-  /** 分享項目列表到 LINE */
+  /** 分享項目列表到 LINE（快照存入 Firestore，分享固定格式網址） */
   async function shareProjects() {
     NW.toast("正在產生分享連結...", "info");
 
@@ -923,7 +934,12 @@
     const snap = await q.get();
     const projects = snap.docs.map((d) => {
       const p = d.data();
-      // 只序列化唯讀頁面需要的欄位，縮短 URL
+      // 序列化所有欄位（含圖片 Base64），存入 Firestore 分享快照
+      const toISO = (v) => {
+        if (!v) return null;
+        const dt = v.toDate ? v.toDate() : new Date(v);
+        return isNaN(dt.getTime()) ? null : dt.toISOString();
+      };
       return {
         id: d.id,
         name: p.name || "",
@@ -936,56 +952,67 @@
         community: p.community || "",
         manpower: p.manpower || {},
         note: p.note || "",
-        // 五階段日期（轉為 ISO 字串）
-        announce: p.announce ? p.announce.toDate().toISOString() : null,
-        bid: p.bid ? p.bid.toDate().toISOString() : null,
-        submitBid: p.submitBid ? p.submitBid.toDate().toISOString() : null,
-        close: p.close ? p.close.toDate().toISOString() : null,
-        brief: p.brief ? p.brief.toDate().toISOString() : null,
-        enter: p.enter ? p.enter.toDate().toISOString() : null,
-        stageDone: p.stageDone || {},
-        updatedAt: p.updatedAt ? p.updatedAt.toDate().toISOString() : null,
+        announce: toISO(p.announce),
+        bid: toISO(p.bid),
+        submitBid: toISO(p.submitBid),
+        close: toISO(p.close),
+        brief: toISO(p.brief),
+        enter: toISO(p.enter),
+        reminder: toISO(p.reminder),
+        createdAt: toISO(p.createdAt),
+        updatedAt: toISO(p.updatedAt),
+        stageDone: Object.fromEntries(
+          Object.entries(p.stageDone || {}).map(([k, v]) => [k, { by: v.by || "", at: toISO(v.at) }])
+        ),
+        quoteImages: sanitizeImages(p.quoteImages || []),
+        feedbackImages: sanitizeImages(p.feedbackImages || []),
       };
     });
 
     if (!projects.length) { NW.toast("目前沒有項目可分享", "error"); return; }
 
-    // 序列化資料並嵌入 URL
-    const payload = { v: 1, projects, ts: Date.now() };
-    const encoded = encodeURIComponent(JSON.stringify(payload));
-    const shareUrl = `${window.location.origin}${window.location.pathname}?share=projects&data=${encoded}`;
+    try {
+      // 將快照存入 Firestore shares 集合，取得固定分享 ID
+      const shareDoc = await db.collection("shares").add({
+        projects,
+        createdBy: uid,
+        createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+      });
+      const shareId = shareDoc.id;
+      const shareUrl = `${window.location.origin}${window.location.pathname}?share=${shareId}`;
 
-    // 檢查 URL 長度（部分瀏覽器/伺服器有上限）
-    if (shareUrl.length > 60000) {
-      NW.toast("項目資料過多，無法產生分享連結", "error");
-      return;
-    }
-
-    // 優先使用 Web Share API（行動裝置可直接分享到 LINE）
-    if (navigator.share) {
-      try {
-        await navigator.share({
-          title: "西北探吉 - 項目管理",
-          text: "項目管理列表（唯讀）",
-          url: shareUrl,
-        });
-        NW.toast("已開啟分享", "success");
-        return;
-      } catch (e) {
-        // 使用者取消，不顯示錯誤
-        if (e.name !== "AbortError") console.warn(e);
+      // 優先使用 Web Share API（行動裝置可直接分享到 LINE）
+      if (navigator.share) {
+        try {
+          await navigator.share({
+            title: "西北探吉 - 項目管理",
+            text: "項目管理列表（唯讀）",
+            url: shareUrl,
+          });
+          NW.toast("已開啟分享", "success");
+          return;
+        } catch (e) {
+          if (e.name !== "AbortError") console.warn(e);
+        }
       }
-    }
 
-    // 後備：開啟 LINE 分享頁
-    const lineUrl = `https://social-plugins.line.me/lineit/share?url=${encodeURIComponent(shareUrl)}`;
-    window.open(lineUrl, "_blank", "noopener,noreferrer");
-    NW.toast("已開啟 LINE 分享頁面", "success");
+      // 後備：開啟 LINE 分享頁
+      const lineUrl = `https://social-plugins.line.me/lineit/share?url=${encodeURIComponent(shareUrl)}`;
+      window.open(lineUrl, "_blank", "noopener,noreferrer");
+      NW.toast("已開啟 LINE 分享頁面", "success");
+    } catch (err) {
+      console.error("分享失敗:", err);
+      NW.toast("分享失敗: " + (err.message || err), "error");
+    }
   }
 
-  /** 唯讀項目列表（用於分享連結開啟的頁面） */
+  /** 唯讀項目列表（用於分享連結開啟的頁面，含資訊/報價單/回饋項目按鈕） */
   function renderReadOnlyList(container, projects) {
     const now = new Date();
+    // 以索引鍵存取專案資料，供按鈕事件使用
+    const projMap = {};
+    projects.forEach((p, i) => { projMap[i] = p; });
+
     container.innerHTML = `
       <div class="readonly-wrap">
         <div class="readonly-header">
@@ -997,10 +1024,10 @@
           <div class="table-wrap">
             <table>
               <thead><tr>
-                <th>項目名稱</th><th>客戶</th><th>負責人</th><th>階段</th><th>進場日期</th><th>狀態</th>
+                <th>項目名稱</th><th>客戶</th><th>負責人</th><th>階段</th><th>進場日期</th><th>狀態</th><th>操作</th>
               </tr></thead>
               <tbody>
-                ${projects.length ? projects.map((p) => {
+                ${projects.length ? projects.map((p, idx) => {
                   const stageTags = STAGES.map((st) => {
                     const t = p[st.key] ? new Date(p[st.key]) : null;
                     const autoDone = t && t < now;
@@ -1010,6 +1037,8 @@
                     const badgeCls = isExpired ? "badge-stage-expired" : (done ? "badge-stage-done" : "badge-stage-pending");
                     return `<span class="badge ${badgeCls}" title="${st.label}${manual ? " ✓" : ""}">${st.label}${manual ? " ✓" : ""}</span>`;
                   }).join("");
+                  const quoteCount = sanitizeImages(p.quoteImages || []).length;
+                  const fbCount = sanitizeImages(p.feedbackImages || []).length;
                   return `<tr>
                     <td data-label="項目名稱">${p.name || "(未命名)"}</td>
                     <td data-label="客戶">${p.client || "-"}</td>
@@ -1017,8 +1046,26 @@
                     <td data-label="階段"><div class="stage-tags">${stageTags}</div></td>
                     <td data-label="進場日期">${p.enter ? NW.formatDate(new Date(p.enter)) : "-"}</td>
                     <td data-label="狀態"><span class="badge badge-${p.status || "pending"}">${statusText(p.status)}</span></td>
+                    <td data-label="操作" class="col-actions">
+                      <div class="file-buttons">
+                        <button class="file-icon-btn info-btn" data-ro-info="${idx}" title="專案資訊">
+                          <span class="file-icon">ℹ️</span>
+                          <span class="file-label">資訊</span>
+                        </button>
+                        <button class="file-icon-btn ${quoteCount > 0 ? "has-file" : "no-file"}" data-ro-quote="${idx}" title="報價單圖片 (${quoteCount}/5)">
+                          <span class="file-icon">📄</span>
+                          <span class="file-label">報價單</span>
+                          <span class="file-count">${quoteCount}/5</span>
+                        </button>
+                        <button class="file-icon-btn ${fbCount > 0 ? "has-file" : "no-file"}" data-ro-feedback="${idx}" title="回饋項目圖片 (${fbCount}/5)">
+                          <span class="file-icon">📝</span>
+                          <span class="file-label">回饋項目</span>
+                          <span class="file-count">${fbCount}/5</span>
+                        </button>
+                      </div>
+                    </td>
                   </tr>`;
-                }).join("") : `<tr><td colspan="6" class="empty">暫無項目</td></tr>`}
+                }).join("") : `<tr><td colspan="7" class="empty">暫無項目</td></tr>`}
               </tbody>
             </table>
           </div>
@@ -1028,6 +1075,28 @@
           <p class="readonly-tip">此頁面為分享快照，資料不會自動更新。</p>
         </div>
       </div>`;
+
+    // 綁定按鈕事件
+    container.querySelectorAll("[data-ro-info]").forEach((b) => {
+      b.onclick = (e) => {
+        e.stopPropagation();
+        showProjectInfoFromData(projMap[b.dataset.roInfo]);
+      };
+    });
+    container.querySelectorAll("[data-ro-quote]").forEach((b) => {
+      b.onclick = (e) => {
+        e.stopPropagation();
+        const p = projMap[b.dataset.roQuote];
+        openImageLightbox(sanitizeImages(p.quoteImages || []), "報價單圖片");
+      };
+    });
+    container.querySelectorAll("[data-ro-feedback]").forEach((b) => {
+      b.onclick = (e) => {
+        e.stopPropagation();
+        const p = projMap[b.dataset.roFeedback];
+        openImageLightbox(sanitizeImages(p.feedbackImages || []), "回饋項目圖片");
+      };
+    });
   }
 
   /* ---------- 工具 ---------- */
