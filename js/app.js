@@ -30,12 +30,61 @@
   });
 
   function render() {
+    // 偵測分享參數（唯讀頁面，不需登入）
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("share") === "projects") {
+      renderShareView(params);
+      return;
+    }
     const user = NW.Auth.getUser();
     if (!user) {
       renderLogin();
       return;
     }
     renderShell();
+  }
+
+  /* ---------- 分享唯讀頁面 ---------- */
+  function renderShareView(params) {
+    const raw = params.get("data") || "";
+    let payload = null;
+    try {
+      payload = JSON.parse(decodeURIComponent(raw));
+    } catch (e) {
+      payload = null;
+    }
+
+    app.innerHTML = `
+      <div class="share-page">
+        <div id="share-content"></div>
+      </div>`;
+
+    const container = document.getElementById("share-content");
+    if (!payload || !Array.isArray(payload.projects)) {
+      container.innerHTML = `
+        <div class="readonly-wrap">
+          <div class="readonly-header">
+            <img src="assets/logo.svg" alt="西北探吉" class="readonly-logo" />
+            <h1 class="readonly-title">分享連結無效</h1>
+            <p class="readonly-sub">此分享連結已損毀或過期，請重新產生。</p>
+          </div>
+        </div>`;
+      return;
+    }
+
+    // 等待 projects.js 載入完成後渲染
+    if (NW.Projects && NW.Projects.renderReadOnly) {
+      NW.Projects.renderReadOnly(container, payload.projects);
+    } else {
+      // 延遲一次確保模組載入
+      setTimeout(() => {
+        if (NW.Projects && NW.Projects.renderReadOnly) {
+          NW.Projects.renderReadOnly(container, payload.projects);
+        } else {
+          container.innerHTML = `<div class="empty">載入失敗，請重新整理頁面</div>`;
+        }
+      }, 300);
+    }
   }
 
   /* ---------- 登入頁 ---------- */

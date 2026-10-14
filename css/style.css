@@ -93,6 +93,16 @@ a { color: var(--brand); text-decoration: none; }
 .login-install { margin-top: 16px; font-size: 12px; color: var(--muted); }
 .login-install button { color: var(--brand); font-weight: 600; }
 
+/* ---------- 分享唯讀頁面 ---------- */
+.share-page { flex: 1; display: flex; flex-direction: column; min-height: 100vh; background: #fafafa; padding: 16px; box-sizing: border-box; overflow-y: auto; }
+.readonly-wrap { max-width: 1200px; width: 100%; margin: 0 auto; }
+.readonly-header { text-align: center; padding: 16px 0 20px; }
+.readonly-logo { width: 72px; height: 72px; margin: 0 auto 8px; display: block; }
+.readonly-title { font-size: 22px; font-weight: 700; color: var(--brand); margin: 0 0 4px; }
+.readonly-sub { color: var(--muted); font-size: 13px; margin: 0; }
+.readonly-footer { margin-top: 16px; text-align: center; color: var(--muted); font-size: 12px; line-height: 1.8; }
+.readonly-tip { color: var(--ink-3); }
+
 /* ---------- 應用主殼層 ---------- */
 .app-shell { flex: 1; display: flex; flex-direction: column; height: 100%; }
 .app-header {
@@ -160,6 +170,7 @@ tr:hover { background: var(--bg-soft); }
 .badge-sales { background: #e3f2fd; color: #1565c0; }
 .badge-stage-done { background: #e8f5e9; color: #2e7d32; font-size: 12px; padding: 2px 8px; }
 .badge-stage-pending { background: #f5f5f5; color: #9e9e9e; font-size: 12px; padding: 2px 8px; }
+.badge-stage-expired { background: #ffebee; color: #c62828; font-size: 12px; padding: 2px 8px; border: 1px solid #ef9a9a; }
 .stage-tags { display: flex; flex-wrap: wrap; gap: 4px; }
 .stage-tag-wrap { display: inline-flex; flex-direction: column; align-items: center; gap: 2px; }
 .stage-clickable { cursor: pointer; transition: transform .1s; }
@@ -219,6 +230,11 @@ tr:hover { background: var(--bg-soft); }
   width: 100%; padding: 8px 10px; border: 1px solid var(--line); border-radius: var(--radius-sm); outline: none;
 }
 .form-grid input:focus, .form-grid select:focus, .form-grid textarea:focus { border-color: var(--brand); }
+.manpower-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 8px; }
+.manpower-item { display: flex; flex-direction: column; align-items: center; }
+.manpower-label { font-size: 12px; color: var(--ink-2); margin-bottom: 4px; text-align: center; }
+.manpower-item input { text-align: center; padding: 6px 4px; }
+@media (max-width: 600px) { .manpower-grid { grid-template-columns: repeat(3, 1fr); } }
 .form-actions { display: flex; gap: 10px; justify-content: flex-end; margin-top: 20px; }
 
 /* ---------- 時間軸 ---------- */
@@ -227,6 +243,8 @@ tr:hover { background: var(--bg-soft); }
 .timeline .stage .stage-name { font-size: 12px; color: var(--ink-2); margin-bottom: 6px; }
 .timeline .stage .stage-date { font-size: 13px; font-weight: 600; color: var(--ink); }
 .timeline .stage.done { border-color: var(--success); background: #e8f5e9; }
+.timeline .stage.expired { border-color: #c62828; background: #ffebee; }
+.timeline .stage.expired .stage-name, .timeline .stage.expired .stage-date { color: #c62828; }
 .timeline .stage.active { border-color: var(--brand); background: var(--brand-light); }
 
 /* ---------- Modal ---------- */
@@ -247,6 +265,26 @@ tr:hover { background: var(--bg-soft); }
 .modal-card.large { max-width: 80vw; max-height: 85vh; display: flex; flex-direction: column; }
 .modal-card.large .modal-body { flex: 1; overflow-y: auto; margin-bottom: 16px; }
 .modal-card.large .modal-actions { flex-shrink: 0; }
+
+/* 超大彈窗（專案資訊，90% 視窗） */
+.modal-card.xlarge { max-width: 90vw; max-height: 90vh; display: flex; flex-direction: column; }
+.modal-card.xlarge .modal-body { flex: 1; overflow-y: auto; margin-bottom: 16px; }
+.modal-card.xlarge .modal-actions { flex-shrink: 0; }
+
+/* 專案資訊頁 */
+.info-modal { padding: 8px 4px; }
+.info-section { margin-bottom: 20px; }
+.info-title { font-size: 15px; font-weight: 700; color: var(--brand); margin: 0 0 10px 0; padding-bottom: 6px; border-bottom: 2px solid var(--brand); }
+.info-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.info-table th, .info-table td { border: 1px solid var(--line); padding: 8px 10px; text-align: left; }
+.info-table th { background: #fafafa; font-weight: 600; color: var(--ink-2); width: 130px; white-space: nowrap; }
+.info-table thead th { background: #f5f5f5; }
+.info-note { padding: 10px 12px; background: #fafafa; border: 1px solid var(--line); border-radius: var(--radius-sm); line-height: 1.6; }
+
+/* 資訊按鈕 */
+.file-icon-btn.info-btn { background: #e3f2fd; color: #1565c0; }
+.file-icon-btn.info-btn .file-icon { font-size: 18px; }
+.file-icon-btn.info-btn .file-label { font-size: 11px; }
 
 /* ---------- Toast ---------- */
 #toast-root { position: fixed; top: calc(var(--nav-h) + var(--safe-top) + 8px); right: 16px; z-index: 2000; display: flex; flex-direction: column; gap: 8px; }
@@ -326,6 +364,7 @@ svg.chart { width: 100%; height: auto; }
 
   .modal-card { max-width: 100%; }
   .modal-card.large { max-width: 100%; max-height: 90vh; }
+  .modal-card.xlarge { max-width: 100%; max-height: 95vh; }
 }
 
 /* 橫屏手機 */

@@ -17,15 +17,22 @@
       currentProjectId = null;
       renderList(container);
     },
+    /** 唯讀渲染（用於分享頁面，不需登入） */
+    renderReadOnly(container, data) {
+      renderReadOnlyList(container, data || []);
+    },
   };
 
   const STAGES = [
     { key: "announce", label: "公告招標" },
     { key: "bid", label: "領標" },
+    { key: "submitBid", label: "送標" },
     { key: "close", label: "結標" },
     { key: "brief", label: "簡報" },
     { key: "enter", label: "進場" },
   ];
+
+  const MANPOWER_ROLES = ["總幹事", "副總幹事", "機電", "財秘", "行秘", "保全", "清潔"];
 
   function renderList(container) {
     const isAdmin = NW.Auth.isAdmin();
@@ -37,7 +44,10 @@
         <div style="display:flex;gap:8px">
           <input id="proj-search" placeholder="搜尋項目名稱或客戶..." style="padding:8px 12px;border:1px solid var(--line);border-radius:var(--radius-sm);min-width:220px" />
         </div>
-        <button class="btn btn-primary" id="add-proj">+ 新增項目</button>
+        <div style="display:flex;gap:8px">
+          <button class="btn btn-ghost" id="share-proj" title="分享項目列表到 LINE">🔗 分享</button>
+          <button class="btn btn-primary" id="add-proj">+ 新增項目</button>
+        </div>
       </div>
       <div class="card">
         <div class="table-wrap">
@@ -51,6 +61,7 @@
       </div>`;
 
     document.getElementById("add-proj").onclick = () => showProjectForm();
+    document.getElementById("share-proj").onclick = () => shareProjects();
     const search = document.getElementById("proj-search");
     let filter = "";
     search.oninput = () => { filter = search.value.trim().toLowerCase(); refreshList(); };
@@ -79,10 +90,13 @@
           const autoDone = t && t.toDate && t.toDate() < now;
           const manual = stageDone[st.key];
           const done = !!manual || autoDone;
+          // 結標到期未手動完成 → 紅色（過期）；其餘階段完成 → 綠色
+          const isExpired = st.key === "close" && autoDone && !manual;
+          const badgeCls = isExpired ? "badge-stage-expired" : (done ? "badge-stage-done" : "badge-stage-pending");
           const byName = manual ? manual.by : "";
           return `
             <div class="stage-tag-wrap">
-              <span class="badge ${done ? "badge-stage-done" : "badge-stage-pending"} stage-clickable"
+              <span class="badge ${badgeCls} stage-clickable"
                     data-pid="${p.id}" data-stage="${st.key}" title="${st.label}">
                 ${st.label}${manual ? " ✓" : ""}
               </span>
@@ -98,6 +112,10 @@
           <td data-label="進場日期">${NW.formatDate(p.enter) || "-"}</td>
           <td data-label="操作" class="col-actions">
             <div class="file-buttons">
+              <button class="file-icon-btn info-btn" data-view-info="${p.id}" title="專案資訊">
+                <span class="file-icon">ℹ️</span>
+                <span class="file-label">資訊</span>
+              </button>
               <button class="file-icon-btn ${(p.quoteImages || []).length ? "has-file" : "no-file"}" data-view-quote="${p.id}" title="報價單圖片 (${(p.quoteImages || []).length}/5)">
                 <span class="file-icon">📄</span>
                 <span class="file-label">報價單</span>
@@ -115,6 +133,7 @@
       body.querySelectorAll(".proj-link").forEach((a) => a.onclick = (e) => { e.preventDefault(); showDetail(a.dataset.id); });
       body.querySelectorAll(".proj-row").forEach((tr) => bindTripleClick(tr, () => showProjectForm(tr.dataset.id)));
       body.querySelectorAll(".stage-clickable").forEach((sp) => sp.onclick = (e) => { e.stopPropagation(); showStageModal(sp.dataset.pid, sp.dataset.stage); });
+      body.querySelectorAll("[data-view-info]").forEach((b) => b.onclick = (e) => { e.stopPropagation(); showProjectInfo(b.dataset.viewInfo); });
       body.querySelectorAll("[data-view-quote]").forEach((b) => b.onclick = (e) => { e.stopPropagation(); viewProjectImages(b.dataset.viewQuote, "quote"); });
       body.querySelectorAll("[data-view-feedback]").forEach((b) => b.onclick = (e) => { e.stopPropagation(); viewProjectImages(b.dataset.viewFeedback, "feedback"); });
     }
@@ -212,6 +231,12 @@
     }
     const isAdmin = NW.Auth.isAdmin();
 
+    // 載入所有帳號姓名，供負責人下拉選擇
+    const usersSnap = await db.collection("users").get();
+    const allUsers = usersSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
+    const currentUserName = (NW.Auth.getUserData() && NW.Auth.getUserData().displayName) || NW.Auth.getUser().email;
+    const ownerDefault = data.ownerName || currentUserName;
+
     // 圖片上傳狀態
     const quoteImages = [...(data.quoteImages || [])];
     const feedbackImages = [...(data.feedbackImages || [])];
@@ -227,13 +252,35 @@
         <div class="form-grid">
           <div><label>項目名稱 *</label><input id="f-name" value="${data.name || ""}" /></div>
           <div><label>客戶/社區</label><input id="f-client" value="${data.client || ""}" /></div>
+          <div><label>戶數</label><input type="number" min="0" id="f-households" value="${data.households || ""}" placeholder="例如：120" /></div>
+          <div><label>屋齡 (年)</label><input type="number" min="0" id="f-buildingAge" value="${data.buildingAge || ""}" placeholder="例如：15" /></div>
+          <div><label>接洽對象</label><input id="f-contact" value="${data.contact || ""}" placeholder="接洽窗口姓名/職稱" /></div>
+          <div><label>社區對象</label><input id="f-community" value="${data.community || ""}" placeholder="社區管理委員會等" /></div>
           <div><label>負責人</label>
-            ${isAdmin ? `<input id="f-owner" value="${data.ownerName || ""}" placeholder="業務姓名" />` : `<input value="${NW.Auth.getUserData().displayName}" disabled />`}
+            ${isAdmin ? `
+              <select id="f-owner">
+                ${allUsers.map((u) => {
+                  const nm = u.displayName || u.email;
+                  return `<option value="${nm}" ${nm === ownerDefault ? "selected" : ""}>${nm}</option>`;
+                }).join("")}
+              </select>
+            ` : `<input value="${currentUserName}" disabled />`}
           </div>
           <div><label>狀態</label>
             <select id="f-status">
               ${["pending", "progress", "done", "cancel"].map((s) => `<option value="${s}" ${data.status === s ? "selected" : ""}>${statusText(s)}</option>`).join("")}
             </select>
+          </div>
+          <div class="full">
+            <label>需求人力</label>
+            <div class="manpower-grid">
+              ${MANPOWER_ROLES.map((r) => `
+                <div class="manpower-item">
+                  <label class="manpower-label">${r}</label>
+                  <input type="number" min="0" id="f-mp-${r}" value="${(data.manpower && data.manpower[r]) || 0}" />
+                </div>
+              `).join("")}
+            </div>
           </div>
           ${STAGES.map((st) => `
             <div><label>${st.label}</label>
@@ -290,6 +337,10 @@
         const payload = {
           name,
           client: document.getElementById("f-client").value.trim(),
+          households: parseInt(document.getElementById("f-households").value, 10) || 0,
+          buildingAge: parseInt(document.getElementById("f-buildingAge").value, 10) || 0,
+          contact: document.getElementById("f-contact").value.trim(),
+          community: document.getElementById("f-community").value.trim(),
           status: document.getElementById("f-status").value,
           note: document.getElementById("f-note").value,
           reminder: parseDT(document.getElementById("f-reminder").value),
@@ -297,9 +348,13 @@
           feedbackImages: feedbackUrls.map((url) => ({ url, name: extractName(url) })),
           updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
         };
+        // 需求人力
+        const manpower = {};
+        MANPOWER_ROLES.forEach((r) => { manpower[r] = parseInt(document.getElementById(`f-mp-${r}`).value, 10) || 0; });
+        payload.manpower = manpower;
         STAGES.forEach((st) => { payload[st.key] = parseDT(document.getElementById(`f-${st.key}`).value); });
         if (isAdmin) {
-          payload.ownerName = document.getElementById("f-owner").value.trim() || (NW.Auth.getUserData().displayName);
+          payload.ownerName = document.getElementById("f-owner").value.trim() || currentUserName;
         }
         if (!isEdit) {
           payload.ownerUid = NW.Auth.getUser().uid;
@@ -459,8 +514,10 @@
             const t = p[st.key];
             const stageDone = p.stageDone || {};
             const manual = stageDone[st.key];
-            const done = !!manual || (t && t.toDate && t.toDate() < now);
-            return `<div class="stage ${done ? "done" : ""}">
+            const autoDone = t && t.toDate && t.toDate() < now;
+            const done = !!manual || autoDone;
+            const isExpired = st.key === "close" && autoDone && !manual;
+            return `<div class="stage ${isExpired ? "expired" : (done ? "done" : "")}">
               <div class="stage-name">${st.label}${manual ? " ✓" : ""}</div>
               <div class="stage-date">${NW.formatDT(t) || "未設定"}</div>
               ${manual ? `<div class="stage-by">完成人：${manual.by}</div>` : ""}
@@ -527,6 +584,201 @@
     });
   }
 
+  /** 顯示專案完整資訊（90% 視窗大小） */
+  async function showProjectInfo(id) {
+    const doc = await db.collection("projects").doc(id).get();
+    if (!doc.exists) { NW.toast("項目不存在", "error"); return; }
+    const p = { id: doc.id, ...doc.data() };
+    const now = new Date();
+    const stageDone = p.stageDone || {};
+    const manpower = p.manpower || {};
+
+    const stageRows = STAGES.map((st) => {
+      const t = p[st.key];
+      const manual = stageDone[st.key];
+      const autoDone = t && t.toDate && t.toDate() < now;
+      const isExpired = st.key === "close" && autoDone && !manual;
+      const done = !!manual || autoDone;
+      const badgeCls = isExpired ? "badge-stage-expired" : (done ? "badge-stage-done" : "badge-stage-pending");
+      return `<tr>
+        <td><span class="badge ${badgeCls}">${st.label}${manual ? " ✓" : ""}</span></td>
+        <td>${NW.formatDT(t) || "未設定"}</td>
+        <td>${manual ? `${manual.by}${manual.at ? `（${NW.formatDT(manual.at)}）` : ""}` : "-"}</td>
+      </tr>`;
+    }).join("");
+
+    const manpowerRows = MANPOWER_ROLES.map((r) => `<tr><td>${r}</td><td>${manpower[r] || 0} 人</td></tr>`).join("");
+
+    NW.modal({
+      title: `專案資訊 - ${p.name || "(未命名)"}`,
+      body: `
+        <div class="info-modal">
+          <div class="info-section">
+            <h4 class="info-title">基本資料</h4>
+            <table class="info-table">
+              <tr><th>項目名稱</th><td>${p.name || "-"}</td></tr>
+              <tr><th>客戶/社區</th><td>${p.client || "-"}</td></tr>
+              <tr><th>戶數</th><td>${p.households || 0} 戶</td></tr>
+              <tr><th>屋齡</th><td>${p.buildingAge || 0} 年</td></tr>
+              <tr><th>接洽對象</th><td>${p.contact || "-"}</td></tr>
+              <tr><th>社區對象</th><td>${p.community || "-"}</td></tr>
+              <tr><th>負責人</th><td>${p.ownerName || "-"}</td></tr>
+              <tr><th>狀態</th><td><span class="badge badge-${p.status || "pending"}">${statusText(p.status)}</span></td></tr>
+              <tr><th>提醒時間</th><td>${NW.formatDT(p.reminder) || "-"}</td></tr>
+              <tr><th>建立時間</th><td>${NW.formatDT(p.createdAt) || "-"}</td></tr>
+              <tr><th>更新時間</th><td>${NW.formatDT(p.updatedAt) || "-"}</td></tr>
+            </table>
+          </div>
+
+          <div class="info-section">
+            <h4 class="info-title">五階段時程</h4>
+            <table class="info-table">
+              <thead><tr><th>階段</th><th>日期時間</th><th>完成人</th></tr></thead>
+              <tbody>${stageRows}</tbody>
+            </table>
+          </div>
+
+          <div class="info-section">
+            <h4 class="info-title">需求人力</h4>
+            <table class="info-table">
+              <thead><tr><th>職稱</th><th>人數</th></tr></thead>
+              <tbody>${manpowerRows}</tbody>
+            </table>
+          </div>
+
+          ${p.note ? `
+          <div class="info-section">
+            <h4 class="info-title">備註</h4>
+            <div class="info-note">${p.note}</div>
+          </div>` : ""}
+        </div>`,
+      onConfirm: (close) => close(),
+      confirmText: "關閉",
+      cancelText: "關閉",
+      xlarge: true,
+    });
+  }
+
+  /** 分享項目列表到 LINE */
+  async function shareProjects() {
+    NW.toast("正在產生分享連結...", "info");
+
+    // 取得目前可見的項目（管理員全部，業務自己的）
+    const isAdmin = NW.Auth.isAdmin();
+    const uid = NW.Auth.getUser().uid;
+    let q = db.collection("projects").orderBy("updatedAt", "desc");
+    if (!isAdmin) q = q.where("ownerUid", "==", uid).orderBy("updatedAt", "desc");
+
+    const snap = await q.get();
+    const projects = snap.docs.map((d) => {
+      const p = d.data();
+      // 只序列化唯讀頁面需要的欄位，縮短 URL
+      return {
+        id: d.id,
+        name: p.name || "",
+        client: p.client || "",
+        ownerName: p.ownerName || "",
+        status: p.status || "pending",
+        households: p.households || 0,
+        buildingAge: p.buildingAge || 0,
+        contact: p.contact || "",
+        community: p.community || "",
+        manpower: p.manpower || {},
+        note: p.note || "",
+        // 五階段日期（轉為 ISO 字串）
+        announce: p.announce ? p.announce.toDate().toISOString() : null,
+        bid: p.bid ? p.bid.toDate().toISOString() : null,
+        submitBid: p.submitBid ? p.submitBid.toDate().toISOString() : null,
+        close: p.close ? p.close.toDate().toISOString() : null,
+        brief: p.brief ? p.brief.toDate().toISOString() : null,
+        enter: p.enter ? p.enter.toDate().toISOString() : null,
+        stageDone: p.stageDone || {},
+        updatedAt: p.updatedAt ? p.updatedAt.toDate().toISOString() : null,
+      };
+    });
+
+    if (!projects.length) { NW.toast("目前沒有項目可分享", "error"); return; }
+
+    // 序列化資料並嵌入 URL
+    const payload = { v: 1, projects, ts: Date.now() };
+    const encoded = encodeURIComponent(JSON.stringify(payload));
+    const shareUrl = `${window.location.origin}${window.location.pathname}?share=projects&data=${encoded}`;
+
+    // 檢查 URL 長度（部分瀏覽器/伺服器有上限）
+    if (shareUrl.length > 60000) {
+      NW.toast("項目資料過多，無法產生分享連結", "error");
+      return;
+    }
+
+    // 優先使用 Web Share API（行動裝置可直接分享到 LINE）
+    if (navigator.share) {
+      try {
+        await navigator.share({
+          title: "西北探吉 - 項目管理",
+          text: "項目管理列表（唯讀）",
+          url: shareUrl,
+        });
+        NW.toast("已開啟分享", "success");
+        return;
+      } catch (e) {
+        // 使用者取消，不顯示錯誤
+        if (e.name !== "AbortError") console.warn(e);
+      }
+    }
+
+    // 後備：開啟 LINE 分享頁
+    const lineUrl = `https://social-plugins.line.me/lineit/share?url=${encodeURIComponent(shareUrl)}`;
+    window.open(lineUrl, "_blank", "noopener,noreferrer");
+    NW.toast("已開啟 LINE 分享頁面", "success");
+  }
+
+  /** 唯讀項目列表（用於分享連結開啟的頁面） */
+  function renderReadOnlyList(container, projects) {
+    const now = new Date();
+    container.innerHTML = `
+      <div class="readonly-wrap">
+        <div class="readonly-header">
+          <img src="assets/logo.svg" alt="西北探吉" class="readonly-logo" />
+          <h1 class="readonly-title">西北探吉 · 項目管理</h1>
+          <p class="readonly-sub">唯讀檢視 · 無法編輯或刪除</p>
+        </div>
+        <div class="card">
+          <div class="table-wrap">
+            <table>
+              <thead><tr>
+                <th>項目名稱</th><th>客戶</th><th>負責人</th><th>階段</th><th>進場日期</th><th>狀態</th>
+              </tr></thead>
+              <tbody>
+                ${projects.length ? projects.map((p) => {
+                  const stageTags = STAGES.map((st) => {
+                    const t = p[st.key] ? new Date(p[st.key]) : null;
+                    const autoDone = t && t < now;
+                    const manual = (p.stageDone || {})[st.key];
+                    const done = !!manual || autoDone;
+                    const isExpired = st.key === "close" && autoDone && !manual;
+                    const badgeCls = isExpired ? "badge-stage-expired" : (done ? "badge-stage-done" : "badge-stage-pending");
+                    return `<span class="badge ${badgeCls}" title="${st.label}${manual ? " ✓" : ""}">${st.label}${manual ? " ✓" : ""}</span>`;
+                  }).join("");
+                  return `<tr>
+                    <td data-label="項目名稱">${p.name || "(未命名)"}</td>
+                    <td data-label="客戶">${p.client || "-"}</td>
+                    <td data-label="負責人">${p.ownerName || "-"}</td>
+                    <td data-label="階段"><div class="stage-tags">${stageTags}</div></td>
+                    <td data-label="進場日期">${p.enter ? NW.formatDate(new Date(p.enter)) : "-"}</td>
+                    <td data-label="狀態"><span class="badge badge-${p.status || "pending"}">${statusText(p.status)}</span></td>
+                  </tr>`;
+                }).join("") : `<tr><td colspan="6" class="empty">暫無項目</td></tr>`}
+              </tbody>
+            </table>
+          </div>
+        </div>
+        <div class="readonly-footer">
+          <p>資料更新時間：${projects.length && projects[0].updatedAt ? NW.formatDT(new Date(projects[0].updatedAt)) : "-"}</p>
+          <p class="readonly-tip">此頁面為分享快照，資料不會自動更新。</p>
+        </div>
+      </div>`;
+  }
+
   /* ---------- 工具 ---------- */
   function statusText(s) { return { pending: "未開始", progress: "進行中", done: "已完成", cancel: "已取消" }[s] || "未開始"; }
   function parseDT(v) { return v ? new Date(v) : null; }
@@ -539,12 +791,13 @@
   }
 
   // 大型 Modal 輔助（暴露給其他模組用）
-  NW.modal = function ({ title, body, large, onConfirm, confirmText = "儲存", cancelText = "取消" }) {
+  NW.modal = function ({ title, body, large, xlarge, onConfirm, confirmText = "儲存", cancelText = "取消" }) {
     const root = document.getElementById("modal-root");
     const id = "m-" + Date.now();
+    const sizeCls = xlarge ? "xlarge" : (large ? "large" : "");
     root.insertAdjacentHTML("beforeend", `
       <div class="modal-overlay" id="${id}">
-        <div class="modal-card ${large ? "large" : ""}">
+        <div class="modal-card ${sizeCls}">
           <h3 class="modal-title">${title}</h3>
           <div class="modal-body">${body}</div>
           <div class="modal-actions">
