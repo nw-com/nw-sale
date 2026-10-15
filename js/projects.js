@@ -34,6 +34,13 @@
 
   const MANPOWER_ROLES = ["總幹事", "副總幹事", "機電", "財秘", "行秘", "保全", "清潔"];
 
+  /** 縣市與行政區對照 */
+  const CITY_DISTRICTS = {
+    "台北市": ["中正區", "大同區", "中山區", "松山區", "大安區", "萬華區", "信義區", "士林區", "北投區", "內湖區", "南港區", "文山區"],
+    "新北市": ["板橋區", "三重區", "中和區", "永和區", "新莊區", "新店區", "樹林區", "鶯歌區", "三峽區", "淡水區", "汐止區", "瑞芳區", "土城區", "蘆洲區", "五股區", "泰山區", "林口區", "深坑區", "石碇區", "坪林區", "三芝區", "石門區", "八里區", "平溪區", "雙溪區", "貢寮區", "金山區", "萬里區", "烏來區"],
+    "桃園市": ["桃園區", "中壢區", "大溪區", "楊梅區", "蘆竹區", "大園區", "龜山區", "八德區", "龍潭區", "平鎮區", "新屋區", "觀音區", "復興區"],
+  };
+
   function renderList(container) {
     const isAdmin = NW.Auth.isAdmin();
     const uid = NW.Auth.getUser().uid;
@@ -256,6 +263,18 @@
           <div><label>屋齡 (年)</label><input type="number" min="0" id="f-buildingAge" value="${data.buildingAge || ""}" placeholder="例如：15" /></div>
           <div><label>接洽對象</label><input id="f-contact" value="${data.contact || ""}" placeholder="接洽窗口姓名/職稱" /></div>
           <div><label>社區對象</label><input id="f-community" value="${data.community || ""}" placeholder="社區管理委員會等" /></div>
+          <div><label>縣市</label>
+            <select id="f-city">
+              <option value="">請選擇縣市</option>
+              ${Object.keys(CITY_DISTRICTS).map((c) => `<option value="${c}" ${data.city === c ? "selected" : ""}>${c}</option>`).join("")}
+            </select>
+          </div>
+          <div><label>行政區</label>
+            <select id="f-district">
+              <option value="">請先選擇縣市</option>
+            </select>
+          </div>
+          <div class="full"><label>社區地址</label><input id="f-address" value="${data.address || ""}" placeholder="例如：台北市中正區XX路XX號" /></div>
           <div><label>負責人</label>
             ${isAdmin ? `
               <select id="f-owner">
@@ -342,6 +361,9 @@
             buildingAge: parseInt(document.getElementById("f-buildingAge").value, 10) || 0,
             contact: document.getElementById("f-contact").value.trim(),
             community: document.getElementById("f-community").value.trim(),
+            city: document.getElementById("f-city").value,
+            district: document.getElementById("f-district").value,
+            address: document.getElementById("f-address").value.trim(),
             status: document.getElementById("f-status").value,
             note: document.getElementById("f-note").value,
             reminder: parseDT(document.getElementById("f-reminder").value),
@@ -380,6 +402,19 @@
     bindImageUpload("feedback", feedbackImages, pendingFeedback, removingFeedback);
     renderImgGrid("quote", quoteImages, removingQuote);
     renderImgGrid("feedback", feedbackImages, removingFeedback);
+
+    // 縣市/行政區連動
+    const citySel = document.getElementById("f-city");
+    const districtSel = document.getElementById("f-district");
+    function updateDistricts() {
+      const city = citySel.value;
+      const districts = CITY_DISTRICTS[city] || [];
+      const curDistrict = data.district || "";
+      districtSel.innerHTML = `<option value="">${districts.length ? "請選擇行政區" : "請先選擇縣市"}</option>` +
+        districts.map((d) => `<option value="${d}" ${d === curDistrict ? "selected" : ""}>${d}</option>`).join("");
+    }
+    citySel.addEventListener("change", updateDistricts);
+    updateDistricts();
 
     // 綁定刪除按鈕（僅管理員可見）
     const delBtn = document.getElementById("modal-delete-btn");
@@ -976,6 +1011,9 @@
               <tr><th>屋齡</th><td>${p.buildingAge || 0} 年</td></tr>
               <tr><th>接洽對象</th><td>${p.contact || "-"}</td></tr>
               <tr><th>社區對象</th><td>${p.community || "-"}</td></tr>
+              <tr><th>縣市</th><td>${p.city || "-"}</td></tr>
+              <tr><th>行政區</th><td>${p.district || "-"}</td></tr>
+              <tr><th>社區地址</th><td>${p.address || "-"}</td></tr>
               <tr><th>負責人</th><td>${p.ownerName || "-"}</td></tr>
               <tr><th>狀態</th><td><span class="badge badge-${p.status || "pending"}">${statusText(p.status)}</span></td></tr>
               <tr><th>提醒時間</th><td>${NW.formatDT(p.reminder) || "-"}</td></tr>
