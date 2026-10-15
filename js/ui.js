@@ -16,8 +16,11 @@
     return new Promise((resolve) => {
       const root = modalRoot();
       const id = "modal-" + Date.now();
+      // 若燈箱已開啟（z-index:10000），確認彈窗需在其上層
+      const hasLightbox = !!document.querySelector(".lightbox-overlay");
+      const z = hasLightbox ? 11000 : 1000;
       root.insertAdjacentHTML("beforeend", `
-        <div class="modal-overlay" id="${id}">
+        <div class="modal-overlay" id="${id}" style="z-index:${z}">
           <div class="modal-card">
             <h3 class="modal-title">${opts.title || "確認"}</h3>
             <p class="modal-msg">${opts.message || ""}</p>
@@ -44,8 +47,11 @@
     return new Promise((resolve) => {
       const root = modalRoot();
       const id = "modal-" + Date.now();
+      // 若燈箱已開啟（z-index:10000），輸入彈窗需在其上層
+      const hasLightbox = !!document.querySelector(".lightbox-overlay");
+      const z = hasLightbox ? 11000 : 1000;
       root.insertAdjacentHTML("beforeend", `
-        <div class="modal-overlay" id="${id}">
+        <div class="modal-overlay" id="${id}" style="z-index:${z}">
           <div class="modal-card">
             <h3 class="modal-title">${opts.title || "輸入"}</h3>
             ${opts.message ? `<p class="modal-msg">${opts.message}</p>` : ""}

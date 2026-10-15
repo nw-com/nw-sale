@@ -57,17 +57,26 @@
       return () => listeners.delete(fn);
     },
 
-    /** 建立用戶（管理員用） */
+    /** 建立用戶（管理員用，不切換目前登入狀態） */
     createUser(email, password, displayName, role) {
-      // 前端建立用戶（需開啟 Auth 電子郵件登入）
-      return auth.createUserWithEmailAndPassword(email, password).then((cred) => {
+      // 使用次要 Firebase 實例建立帳號，避免 createUserWithEmailAndPassword 自動切換登入
+      const secondaryApp = firebase.initializeApp(window.FIREBASE_CONFIG, "nw-temp-" + Date.now());
+      const secondaryAuth = secondaryApp.auth();
+      return secondaryAuth.createUserWithEmailAndPassword(email, password).then((cred) => {
         return db.collection("users").doc(cred.user.uid).set({
           email,
           displayName: displayName || email,
           role: role || "sales",
           disabled: false,
           createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+        }).then(() => {
+          // 建立完成後登出次要實例並刪除，不影響主要登入階段
+          return secondaryAuth.signOut().then(() => secondaryApp.delete());
         });
+      }).catch((err) => {
+        // 失敗時清理次要實例
+        try { secondaryApp.delete(); } catch (e) {}
+        throw err;
       });
     },
 

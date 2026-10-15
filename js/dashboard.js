@@ -27,10 +27,8 @@
 
   function loadStats(container) {
     const grid = container.querySelector("#stats-grid");
-    const isAdmin = NW.Auth.isAdmin();
-    const uid = NW.Auth.getUser().uid;
-    let q = db.collection("projects");
-    if (!isAdmin) q = q.where("ownerUid", "==", uid);
+    // 所有已驗證使用者皆可讀取全部項目
+    const q = db.collection("projects");
 
     unsub = q.onSnapshot((snap) => {
       const projects = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
@@ -54,10 +52,7 @@
 
   function loadReminders(container) {
     const box = container.querySelector("#reminders");
-    const isAdmin = NW.Auth.isAdmin();
-    const uid = NW.Auth.getUser().uid;
-    let q = db.collection("projects");
-    if (!isAdmin) q = q.where("ownerUid", "==", uid);
+    const q = db.collection("projects");
 
     q.get().then((snap) => {
       const now = Date.now();
@@ -83,10 +78,7 @@
 
   function loadCalendar(container) {
     const box = container.querySelector("#calendar-card");
-    const isAdmin = NW.Auth.isAdmin();
-    const uid = NW.Auth.getUser().uid;
-    let q = db.collection("projects");
-    if (!isAdmin) q = q.where("ownerUid", "==", uid);
+    const q = db.collection("projects");
 
     q.get().then((snap) => {
       // 收集所有階段日期 -> { "YYYY-MM-DD": [專案名...] }
@@ -144,10 +136,7 @@
 
   function loadRecent(container) {
     const box = container.querySelector("#recent-projects");
-    const isAdmin = NW.Auth.isAdmin();
-    const uid = NW.Auth.getUser().uid;
-    let q = db.collection("projects").limit(50);
-    if (!isAdmin) q = db.collection("projects").where("ownerUid", "==", uid).limit(50);
+    const q = db.collection("projects").limit(50);
 
     q.get().then((snap) => {
       const stageKeys = ["announce", "bid", "close", "brief", "enter"];

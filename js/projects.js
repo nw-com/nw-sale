@@ -73,8 +73,8 @@
     let filter = "";
     search.oninput = () => { filter = search.value.trim().toLowerCase(); refreshList(); };
 
+    // 所有已驗證使用者皆可讀取全部項目（規則已開放）
     let q = db.collection("projects");
-    if (!isAdmin) q = db.collection("projects").where("ownerUid", "==", uid);
 
     unsub = q.onSnapshot((snap) => {
       // 客戶端依 updatedAt 降序排序，避免需要 Firestore 複合索引
@@ -630,15 +630,20 @@
       approval,
       canApprove: NW.Auth.canApprove(),
       onApprove: async (status, note) => {
-        await db.collection("projects").doc(id).update({
-          [approvalField]: {
-            status,
-            note: note || "",
-            by: NW.Auth.getUserData()?.displayName || NW.Auth.getUser()?.email || "",
-            at: firebase.firestore.FieldValue.serverTimestamp(),
-          },
-        });
-        NW.toast(status === "approved" ? "已審核通過" : "已標記未通過", "success");
+        const isPending = status === "pending";
+        const data = isPending
+          ? { status: "pending", note: "", by: "", at: null }
+          : {
+              status,
+              note: note || "",
+              by: NW.Auth.getUserData()?.displayName || NW.Auth.getUser()?.email || "",
+              at: firebase.firestore.FieldValue.serverTimestamp(),
+            };
+        await db.collection("projects").doc(id).update({ [approvalField]: data });
+        NW.toast(
+          isPending ? "已解除審核" : status === "approved" ? "已審核通過" : "已標記未通過",
+          "success"
+        );
       },
     });
   }
@@ -662,6 +667,10 @@
 
     // 可審核者（管理員/主管）顯示操作按鈕；其餘僅顯示狀態
     if (opts.canApprove) {
+      const approveActive = status === "approved";
+      const rejectActive = status === "rejected";
+      const approveCls = approveActive ? "is-active" : (rejectActive ? "is-other" : "");
+      const rejectCls = rejectActive ? "is-active" : (approveActive ? "is-other" : "");
       return `
         <div class="approval-bar" id="${lbId}-approval">
           <div class="approval-status">
@@ -669,8 +678,8 @@
             ${by ? `<span class="approval-meta">${by}${at ? ` · ${at}` : ""}</span>` : ""}
           </div>
           <div class="approval-actions">
-            <button class="approval-btn approval-btn-approve" data-approve="approved">✓ 審核通過</button>
-            <button class="approval-btn approval-btn-reject" data-approve="rejected">✕ 未通過</button>
+            <button class="approval-btn approval-btn-approve ${approveCls}" data-approve="approved">${approveActive ? "✓ 已通過" : "✓ 審核通過"}</button>
+            <button class="approval-btn approval-btn-reject ${rejectCls}" data-approve="rejected">${rejectActive ? "✕ 未通過" : "✕ 未通過"}</button>
           </div>
           ${note ? `<div class="approval-note">備註：${note}</div>` : ""}
         </div>`;
@@ -735,20 +744,33 @@
       approveBtns.forEach((btn) => {
         btn.onclick = async (e) => {
           e.stopPropagation();
-          const status = btn.dataset.approve;
+          const clicked = btn.dataset.approve;
+          const current = (opts.approval && opts.approval.status) || "pending";
+          // 點擊當前已啟用的按鈕 → 解除審核（回到 pending）；否則切換至該狀態
+          const isUndo = clicked === current;
+          const newStatus = isUndo ? "pending" : clicked;
+          const label = newStatus === "pending" ? "解除審核" : (newStatus === "approved" ? "審核通過" : "標記未通過");
           const ok = await NW.confirm({
-            title: status === "approved" ? "審核通過" : "標記未通過",
-            message: `確定要將此${opts.type === "quote" ? "報價單" : "回饋項目"}標記為「${status === "approved" ? "審核通過" : "未通過"}」嗎？`,
+            title: label,
+            message: isUndo
+              ? `確定要解除此${opts.type === "quote" ? "報價單" : "回饋項目"}的審核狀態嗎？`
+              : `確定要將此${opts.type === "quote" ? "報價單" : "回饋項目"}標記為「${newStatus === "approved" ? "審核通過" : "未通過"}」嗎？`,
           });
           if (!ok) return;
           btn.disabled = true;
           try {
-            await opts.onApprove(status, "");
-            // 更新審核列顯示
+            await opts.onApprove(newStatus, "");
+            // 更新本地審核狀態並重新渲染審核列
+            opts.approval = isUndo
+              ? { status: "pending" }
+              : {
+                  status: newStatus,
+                  by: NW.Auth.getUserData()?.displayName || NW.Auth.getUser()?.email || "",
+                  at: new Date(),
+                };
             const approvalBar = overlay.querySelector(".approval-bar");
             if (approvalBar) {
-              const newApproval = { status, by: NW.Auth.getUserData()?.displayName || NW.Auth.getUser()?.email || "", at: new Date() };
-              approvalBar.outerHTML = renderApprovalBar({ ...opts, approval: newApproval }, lbId);
+              approvalBar.outerHTML = renderApprovalBar({ ...opts, approval: opts.approval }, lbId);
             }
           } catch (err) {
             NW.toast("審核失敗: " + (err.message || err), "error");
@@ -1065,13 +1087,8 @@
   async function shareProjects() {
     NW.toast("正在產生分享連結...", "info");
 
-    // 取得目前可見的項目（管理員全部，業務自己的）
-    const isAdmin = NW.Auth.isAdmin();
-    const uid = NW.Auth.getUser().uid;
-    let q = db.collection("projects").orderBy("updatedAt", "desc");
-    if (!isAdmin) q = q.where("ownerUid", "==", uid).orderBy("updatedAt", "desc");
-
-    const snap = await q.get();
+    // 取得全部項目（所有已驗證使用者皆可讀取）
+    const snap = await db.collection("projects").orderBy("updatedAt", "desc").get();
     const projects = snap.docs.map((d) => {
       const p = d.data();
       // 序列化所有欄位（含圖片 Base64），存入 Firestore 分享快照
