@@ -52,7 +52,7 @@
           <input id="proj-search" placeholder="搜尋項目名稱或客戶..." style="padding:8px 12px;border:1px solid var(--line);border-radius:var(--radius-sm);min-width:220px" />
         </div>
         <div style="display:flex;gap:8px">
-          <button class="btn btn-ghost" id="share-proj" title="分享項目列表到 LINE">🔗 分享</button>
+          ${isAdmin ? `<button class="btn btn-ghost" id="share-proj" title="分享項目列表到 LINE">🔗 分享</button>` : ""}
           <button class="btn btn-primary" id="add-proj">+ 新增項目</button>
         </div>
       </div>
@@ -68,7 +68,8 @@
       </div>`;
 
     document.getElementById("add-proj").onclick = () => showProjectForm();
-    document.getElementById("share-proj").onclick = () => shareProjects();
+    const shareBtn = document.getElementById("share-proj");
+    if (shareBtn) shareBtn.onclick = () => shareProjects();
     const search = document.getElementById("proj-search");
     let filter = "";
     search.oninput = () => { filter = search.value.trim().toLowerCase(); refreshList(); };
@@ -734,49 +735,51 @@
           <span class="lb-zoom-level">100%</span>
           <button class="lb-zoom-in" aria-label="放大">+</button>
           <button class="lb-zoom-reset" aria-label="重設">重設</button>
+          <button class="lb-download" aria-label="下載原圖">⬇ 下載原圖</button>
         </div>
       </div>`;
     document.getElementById("modal-root").appendChild(overlay);
 
-    // 審核按鈕事件（僅管理員/主管可操作）
+    // 審核按鈕事件（僅管理員/主管可操作）— 使用事件委派，避免重新渲染後遺失監聽器
     if (opts.canApprove && opts.onApprove) {
-      const approveBtns = overlay.querySelectorAll("[data-approve]");
-      approveBtns.forEach((btn) => {
-        btn.onclick = async (e) => {
-          e.stopPropagation();
-          const clicked = btn.dataset.approve;
-          const current = (opts.approval && opts.approval.status) || "pending";
-          // 點擊當前已啟用的按鈕 → 解除審核（回到 pending）；否則切換至該狀態
-          const isUndo = clicked === current;
-          const newStatus = isUndo ? "pending" : clicked;
-          const label = newStatus === "pending" ? "解除審核" : (newStatus === "approved" ? "審核通過" : "標記未通過");
-          const ok = await NW.confirm({
-            title: label,
-            message: isUndo
-              ? `確定要解除此${opts.type === "quote" ? "報價單" : "回饋項目"}的審核狀態嗎？`
-              : `確定要將此${opts.type === "quote" ? "報價單" : "回饋項目"}標記為「${newStatus === "approved" ? "審核通過" : "未通過"}」嗎？`,
-          });
-          if (!ok) return;
-          btn.disabled = true;
-          try {
-            await opts.onApprove(newStatus, "");
-            // 更新本地審核狀態並重新渲染審核列
-            opts.approval = isUndo
-              ? { status: "pending" }
-              : {
-                  status: newStatus,
-                  by: NW.Auth.getUserData()?.displayName || NW.Auth.getUser()?.email || "",
-                  at: new Date(),
-                };
-            const approvalBar = overlay.querySelector(".approval-bar");
-            if (approvalBar) {
-              approvalBar.outerHTML = renderApprovalBar({ ...opts, approval: opts.approval }, lbId);
-            }
-          } catch (err) {
-            NW.toast("審核失敗: " + (err.message || err), "error");
-            btn.disabled = false;
+      overlay.addEventListener("click", async (e) => {
+        const btn = e.target.closest("[data-approve]");
+        if (!btn) return;
+        e.stopPropagation();
+        const clicked = btn.dataset.approve;
+        const current = (opts.approval && opts.approval.status) || "pending";
+        // 點擊當前已啟用的按鈕 → 解除審核（回到 pending）；否則切換至該狀態
+        const isUndo = clicked === current;
+        const newStatus = isUndo ? "pending" : clicked;
+        const label = newStatus === "pending" ? "解除審核" : (newStatus === "approved" ? "審核通過" : "標記未通過");
+        const ok = await NW.confirm({
+          title: label,
+          message: isUndo
+            ? `確定要解除此${opts.type === "quote" ? "報價單" : "回饋項目"}的審核狀態嗎？`
+            : `確定要將此${opts.type === "quote" ? "報價單" : "回饋項目"}標記為「${newStatus === "approved" ? "審核通過" : "未通過"}」嗎？`,
+        });
+        if (!ok) return;
+        btn.disabled = true;
+        try {
+          await opts.onApprove(newStatus, "");
+          // 更新本地審核狀態並重新渲染審核列
+          opts.approval = isUndo
+            ? { status: "pending" }
+            : {
+                status: newStatus,
+                by: NW.Auth.getUserData()?.displayName || NW.Auth.getUser()?.email || "",
+                at: new Date(),
+              };
+          const approvalBar = overlay.querySelector(".approval-bar");
+          if (approvalBar) {
+            approvalBar.outerHTML = renderApprovalBar({ ...opts, approval: opts.approval }, lbId);
           }
-        };
+          // 同步更新下載按鈕狀態
+          updateDownloadBtn();
+        } catch (err) {
+          NW.toast("審核失敗: " + (err.message || err), "error");
+          btn.disabled = false;
+        }
       });
     }
 
@@ -827,6 +830,41 @@
     overlay.querySelector(".lb-zoom-in").onclick = (e) => { e.stopPropagation(); zoomBy(1.25); };
     overlay.querySelector(".lb-zoom-out").onclick = (e) => { e.stopPropagation(); zoomBy(0.8); };
     overlay.querySelector(".lb-zoom-reset").onclick = (e) => { e.stopPropagation(); resetZoom(); };
+
+    // 下載原圖按鈕（僅「審核通過」可下載）
+    const downloadBtn = overlay.querySelector(".lb-download");
+    function updateDownloadBtn() {
+      const status = (opts.approval && opts.approval.status) || "pending";
+      if (status === "approved") {
+        downloadBtn.disabled = false;
+        downloadBtn.classList.remove("is-disabled");
+        downloadBtn.title = "下載原始圖檔";
+      } else {
+        downloadBtn.disabled = true;
+        downloadBtn.classList.add("is-disabled");
+        downloadBtn.title = status === "rejected" ? "未通過審核，無法下載" : "審核中，無法下載";
+      }
+    }
+    downloadBtn.onclick = (e) => {
+      e.stopPropagation();
+      if (downloadBtn.disabled) return;
+      const img = images[cur];
+      const url = img && img.url;
+      if (!url) return;
+      // 判斷副檔名
+      let ext = "png";
+      const m = url.match(/^data:image\/(\w+);/);
+      if (m) ext = m[1] === "jpeg" ? "jpg" : m[1];
+      const fname = (img.name || `image_${cur + 1}`).replace(/\.[^.]+$/, "") + "." + ext;
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = fname;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      NW.toast("已開始下載：" + fname, "success");
+    };
+    updateDownloadBtn();
 
     // 鍵盤操作
     function onKey(e) {
@@ -1244,14 +1282,18 @@
       b.onclick = (e) => {
         e.stopPropagation();
         const p = projMap[b.dataset.roQuote];
-        openImageLightbox(sanitizeImages(p.quoteImages || []), "報價單圖片");
+        openImageLightbox(sanitizeImages(p.quoteImages || []), "報價單圖片", {
+          approval: p.quoteApproval || { status: "pending" },
+        });
       };
     });
     container.querySelectorAll("[data-ro-feedback]").forEach((b) => {
       b.onclick = (e) => {
         e.stopPropagation();
         const p = projMap[b.dataset.roFeedback];
-        openImageLightbox(sanitizeImages(p.feedbackImages || []), "回饋項目圖片");
+        openImageLightbox(sanitizeImages(p.feedbackImages || []), "回饋項目圖片", {
+          approval: p.feedbackApproval || { status: "pending" },
+        });
       };
     });
   }

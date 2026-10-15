@@ -188,16 +188,16 @@ tr:hover { background: var(--bg-soft); }
 .proj-hint { font-size: 12px; color: var(--ink-3); margin-left: 8px; }
 .file-buttons { display: flex; gap: 6px; justify-content: flex-end; margin-top: 6px; }
 .file-icon-btn {
-  display: inline-flex; flex-direction: column; align-items: center; gap: 0;
-  padding: 3px 4px; border: 1px solid var(--line); border-radius: var(--radius-sm);
+  display: inline-flex; flex-direction: column; align-items: center; justify-content: center; gap: 1px;
+  padding: 4px 4px; border: 1px solid var(--line); border-radius: var(--radius-sm);
   background: #fff; cursor: pointer; min-width: 42px; transition: all .15s;
 }
 .file-icon-btn.has-file { border-color: var(--primary); background: #fff5f5; color: var(--primary); }
 .file-icon-btn.no-file { border-color: #e0e0e0; background: #fafafa; color: #bdbdbd; }
 .file-icon-btn.has-file:hover { background: #ffebee; }
-.file-icon-btn .file-icon { font-size: 13px; line-height: 1; }
-.file-icon-btn .file-label { font-size: 9px; line-height: 1; }
-.file-icon-btn .file-count { font-size: 8px; line-height: 1; opacity: .8; }
+.file-icon-btn .file-icon { font-size: 16px; line-height: 1; }
+.file-icon-btn .file-label { font-size: 10px; line-height: 1; }
+.file-icon-btn .file-count { font-size: 9px; line-height: 1; opacity: .8; }
 
 /* 圖片上傳區域 */
 .img-upload-area { border: 1px dashed var(--line); border-radius: var(--radius-sm); padding: 12px; }
@@ -290,6 +290,17 @@ tr:hover { background: var(--bg-soft); }
 .lightbox-footer button:hover { background: rgba(255,255,255,0.3); }
 .lb-zoom-level { font-size: 13px; min-width: 56px; text-align: center; }
 .lb-zoom-reset { font-size: 12px !important; }
+/* 下載原圖按鈕：僅審核通過可點擊 */
+.lb-download { background: #2e7d32 !important; font-size: 12px !important; }
+.lb-download:hover:not(:disabled) { background: #388e3c !important; }
+.lb-download.is-disabled,
+.lb-download:disabled {
+  background: #555 !important;
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.lb-download.is-disabled:hover,
+.lb-download:disabled:hover { background: #555 !important; }
 
 /* ---------- 審核列（燈箱內） ---------- */
 .approval-bar {
@@ -414,8 +425,6 @@ tr:hover { background: var(--bg-soft); }
 
 /* 資訊按鈕 */
 .file-icon-btn.info-btn { background: #e3f2fd; color: #1565c0; }
-.file-icon-btn.info-btn .file-icon { font-size: 18px; }
-.file-icon-btn.info-btn .file-label { font-size: 11px; }
 
 /* ---------- Toast ---------- */
 #toast-root { position: fixed; top: calc(var(--nav-h) + var(--safe-top) + 8px); right: 16px; z-index: 2000; display: flex; flex-direction: column; gap: 8px; }
@@ -489,6 +498,12 @@ svg.chart { width: 100%; height: auto; }
   .table-wrap tr { border: 1px solid var(--line); border-radius: var(--radius-sm); margin-bottom: 10px; padding: 8px; }
   .table-wrap td { border: none; padding: 4px 0; display: flex; justify-content: space-between; }
   .table-wrap td::before { content: attr(data-label); color: var(--muted); font-size: 12px; margin-right: 8px; }
+
+  /* 操作欄：三個按鈕平均撐滿整個欄位寬度 */
+  .table-wrap td.col-actions { display: block; text-align: left; }
+  .table-wrap td.col-actions::before { display: block; margin-bottom: 6px; text-align: left; }
+  .col-actions .file-buttons { width: 100%; justify-content: stretch; margin-top: 0; }
+  .col-actions .file-icon-btn { flex: 1; min-width: 0; padding: 6px 2px; }
 
   .quote-item-row { grid-template-columns: 1fr 1fr; }
   .quote-item-row .col-del { grid-column: 1 / -1; }
