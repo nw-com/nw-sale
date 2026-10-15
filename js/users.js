@@ -39,7 +39,7 @@
           <tr>
             <td data-label="姓名">${u.displayName || "-"}</td>
             <td data-label="Email">${u.email}</td>
-            <td data-label="角色"><span class="badge badge-${u.role}">${u.role === "admin" ? "管理員" : "業務"}</span></td>
+            <td data-label="角色"><span class="badge badge-${u.role}">${NW.Auth.getRoleLabel(u.role)}</span></td>
             <td data-label="狀態"><span class="badge ${u.disabled ? "badge-cancel" : "badge-done"}">${u.disabled ? "停用" : "啟用"}</span></td>
             <td data-label="建立時間">${NW.formatDT(u.createdAt)}</td>
             <td data-label="操作">
@@ -77,7 +77,7 @@
       if (!u) return;
       document.getElementById("p-email").textContent = u.email;
       document.getElementById("p-name").textContent = u.displayName || "-";
-      document.getElementById("p-role").innerHTML = `<span class="badge badge-${u.role}">${u.role === "admin" ? "管理員" : "業務"}</span>`;
+      document.getElementById("p-role").innerHTML = `<span class="badge badge-${u.role}">${NW.Auth.getRoleLabel(u.role)}</span>`;
       document.getElementById("p-status").innerHTML = `<span class="badge ${u.disabled ? "badge-cancel" : "badge-done"}">${u.disabled ? "停用" : "啟用"}</span>`;
     });
 
@@ -93,7 +93,11 @@
           <div class="full"><label>密碼 *</label><input id="u-pw" type="password" placeholder="至少 6 碼" /></div>
           <div class="full"><label>姓名</label><input id="u-name" placeholder="顯示名稱" /></div>
           <div class="full"><label>角色</label>
-            <select id="u-role"><option value="sales">業務</option><option value="admin">管理員</option></select>
+            <select id="u-role">
+              <option value="sales">業務</option>
+              <option value="supervisor">主管</option>
+              <option value="admin">管理員</option>
+            </select>
           </div>
         </div>`,
       onConfirm: async (close) => {
@@ -122,6 +126,7 @@
           <div class="full"><label>角色</label>
             <select id="e-role">
               <option value="sales" ${u.role === "sales" ? "selected" : ""}>業務</option>
+              <option value="supervisor" ${u.role === "supervisor" ? "selected" : ""}>主管</option>
               <option value="admin" ${u.role === "admin" ? "selected" : ""}>管理員</option>
             </select>
           </div>` : "";

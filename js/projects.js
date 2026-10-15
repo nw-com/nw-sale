@@ -577,11 +577,73 @@
     const p = doc.data() || {};
     const images = sanitizeImages(type === "quote" ? (p.quoteImages || []) : (p.feedbackImages || []));
     const title = type === "quote" ? "報價單圖片" : "回饋項目圖片";
-    openImageLightbox(images, title);
+    const approvalField = type === "quote" ? "quoteApproval" : "feedbackApproval";
+    const approval = p[approvalField] || { status: "pending" };
+    openImageLightbox(images, title, {
+      projectId: id,
+      type,
+      approval,
+      canApprove: NW.Auth.canApprove(),
+      onApprove: async (status, note) => {
+        await db.collection("projects").doc(id).update({
+          [approvalField]: {
+            status,
+            note: note || "",
+            by: NW.Auth.getUserData()?.displayName || NW.Auth.getUser()?.email || "",
+            at: firebase.firestore.FieldValue.serverTimestamp(),
+          },
+        });
+        NW.toast(status === "approved" ? "已審核通過" : "已標記未通過", "success");
+      },
+    });
+  }
+
+  /** 審核狀態標籤設定 */
+  const APPROVAL_STATUS = {
+    pending: { label: "審核中", cls: "approval-pending" },
+    approved: { label: "審核通過", cls: "approval-approved" },
+    rejected: { label: "未通過", cls: "approval-rejected" },
+  };
+
+  /** 產生燈箱中的審核列 HTML */
+  function renderApprovalBar(opts, lbId) {
+    if (!opts.approval) return "";
+    const approval = opts.approval;
+    const status = approval.status || "pending";
+    const st = APPROVAL_STATUS[status] || APPROVAL_STATUS.pending;
+    const by = approval.by || "";
+    const at = approval.at ? NW.formatDT(approval.at) : "";
+    const note = approval.note || "";
+
+    // 可審核者（管理員/主管）顯示操作按鈕；其餘僅顯示狀態
+    if (opts.canApprove) {
+      return `
+        <div class="approval-bar" id="${lbId}-approval">
+          <div class="approval-status">
+            <span class="approval-badge ${st.cls}">${st.label}</span>
+            ${by ? `<span class="approval-meta">${by}${at ? ` · ${at}` : ""}</span>` : ""}
+          </div>
+          <div class="approval-actions">
+            <button class="approval-btn approval-btn-approve" data-approve="approved">✓ 審核通過</button>
+            <button class="approval-btn approval-btn-reject" data-approve="rejected">✕ 未通過</button>
+          </div>
+          ${note ? `<div class="approval-note">備註：${note}</div>` : ""}
+        </div>`;
+    }
+    // 一般使用者（業務）僅顯示狀態
+    return `
+      <div class="approval-bar" id="${lbId}-approval">
+        <div class="approval-status">
+          <span class="approval-badge ${st.cls}">${st.label}</span>
+          ${by ? `<span class="approval-meta">${by}${at ? ` · ${at}` : ""}</span>` : ""}
+        </div>
+        ${note ? `<div class="approval-note">備註：${note}</div>` : ""}
+      </div>`;
   }
 
   /** 以圖片陣列直接開啟燈箱（用於分享頁面） */
-  function openImageLightbox(images, title) {
+  function openImageLightbox(images, title, opts) {
+    opts = opts || {};
     if (!images || !images.length) {
       NW.modal({
         title: title,
@@ -612,6 +674,7 @@
           </div>
           <button class="lb-nav lb-next" aria-label="下一張">›</button>
         </div>
+        ${renderApprovalBar(opts, lbId)}
         <div class="lightbox-footer">
           <button class="lb-zoom-out" aria-label="縮小">−</button>
           <span class="lb-zoom-level">100%</span>
@@ -620,6 +683,35 @@
         </div>
       </div>`;
     document.getElementById("modal-root").appendChild(overlay);
+
+    // 審核按鈕事件（僅管理員/主管可操作）
+    if (opts.canApprove && opts.onApprove) {
+      const approveBtns = overlay.querySelectorAll("[data-approve]");
+      approveBtns.forEach((btn) => {
+        btn.onclick = async (e) => {
+          e.stopPropagation();
+          const status = btn.dataset.approve;
+          const ok = await NW.confirm({
+            title: status === "approved" ? "審核通過" : "標記未通過",
+            message: `確定要將此${opts.type === "quote" ? "報價單" : "回饋項目"}標記為「${status === "approved" ? "審核通過" : "未通過"}」嗎？`,
+          });
+          if (!ok) return;
+          btn.disabled = true;
+          try {
+            await opts.onApprove(status, "");
+            // 更新審核列顯示
+            const approvalBar = overlay.querySelector(".approval-bar");
+            if (approvalBar) {
+              const newApproval = { status, by: NW.Auth.getUserData()?.displayName || NW.Auth.getUser()?.email || "", at: new Date() };
+              approvalBar.outerHTML = renderApprovalBar({ ...opts, approval: newApproval }, lbId);
+            }
+          } catch (err) {
+            NW.toast("審核失敗: " + (err.message || err), "error");
+            btn.disabled = false;
+          }
+        };
+      });
+    }
 
     // 狀態
     let cur = 0;

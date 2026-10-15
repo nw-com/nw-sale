@@ -9,6 +9,18 @@ service cloud.firestore {
         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin';
     }
 
+    // 判斷是否為主管
+    function isSupervisor() {
+      return request.auth != null &&
+        exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'supervisor';
+    }
+
+    // 判斷是否可審核（管理員或主管）
+    function canApprove() {
+      return isAdmin() || isSupervisor();
+    }
+
     // 判斷是否停用
     function isDisabled() {
       return request.auth != null &&

@@ -8,8 +8,10 @@
   const auth = window.auth;
 
   let currentUser = null;
-  let currentUserRole = null; // "admin" | "sales"
+  let currentUserRole = null; // "admin" | "supervisor" | "sales"
   let currentUserData = null; // Firestore users 文件
+
+  const ROLE_LABELS = { admin: "管理員", supervisor: "主管", sales: "業務" };
 
   const listeners = new Set();
 
@@ -41,6 +43,14 @@
     getRole() { return currentUserRole; },
     getUserData() { return currentUserData; },
     isAdmin() { return currentUserRole === "admin"; },
+    isSupervisor() { return currentUserRole === "supervisor"; },
+    /** 是否可執行審核（管理員或主管） */
+    canApprove() { return currentUserRole === "admin" || currentUserRole === "supervisor"; },
+    /** 角色中文名稱 */
+    getRoleLabel(role) {
+      const r = role || currentUserRole;
+      return ROLE_LABELS[r] || r || "未知";
+    },
 
     onChange(fn) {
       listeners.add(fn);
