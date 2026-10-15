@@ -73,11 +73,18 @@
     let filter = "";
     search.oninput = () => { filter = search.value.trim().toLowerCase(); refreshList(); };
 
-    let q = db.collection("projects").orderBy("updatedAt", "desc");
-    if (!isAdmin) q = db.collection("projects").where("ownerUid", "==", uid).orderBy("updatedAt", "desc");
+    let q = db.collection("projects");
+    if (!isAdmin) q = db.collection("projects").where("ownerUid", "==", uid);
 
     unsub = q.onSnapshot((snap) => {
-      window._projects = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+      // 客戶端依 updatedAt 降序排序，避免需要 Firestore 複合索引
+      window._projects = snap.docs
+        .map((d) => ({ id: d.id, ...d.data() }))
+        .sort((a, b) => {
+          const ta = a.updatedAt ? (a.updatedAt.seconds || 0) : 0;
+          const tb = b.updatedAt ? (b.updatedAt.seconds || 0) : 0;
+          return tb - ta;
+        });
       refreshList();
     }, (err) => {
       document.getElementById("proj-body").innerHTML = `<tr><td colspan="6" class="empty">載入失敗: ${err.message}</td></tr>`;
@@ -238,9 +245,12 @@
     }
     const isAdmin = NW.Auth.isAdmin();
 
-    // 載入所有帳號姓名，供負責人下拉選擇
-    const usersSnap = await db.collection("users").get();
-    const allUsers = usersSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
+    // 僅管理員需要載入所有帳號姓名（供負責人下拉選擇），業務僅能選自己
+    let allUsers = [];
+    if (isAdmin) {
+      const usersSnap = await db.collection("users").get();
+      allUsers = usersSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
+    }
     const currentUserName = (NW.Auth.getUserData() && NW.Auth.getUserData().displayName) || NW.Auth.getUser().email;
     const ownerDefault = data.ownerName || currentUserName;
 
